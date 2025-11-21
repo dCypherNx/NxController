@@ -11,6 +11,8 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_WORKFLOW: Release
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -58,3 +60,13 @@ jobs:
               ref: `refs/tags/${tag}`,
               sha: context.sha,
             });
+
+      - name: Trigger release workflow
+        if: steps.exists.outputs.present == 'false'
+        uses: peter-evans/workflow-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: ${{ env.RELEASE_WORKFLOW }}
+          ref: ${{ github.ref }}
+          inputs:
+            tag: ${{ steps.tag.outputs.name }}

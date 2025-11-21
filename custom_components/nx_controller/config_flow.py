@@ -129,6 +129,13 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     source_type,
                 )
                 errors["base"] = "cannot_connect"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception(
+                    "Unexpected error validating source %s (%s)",
+                    cleaned_host,
+                    source_type,
+                )
+                errors["base"] = "unknown"
 
             if not errors:
                 await self._ensure_unique_primary(cleaned_host)

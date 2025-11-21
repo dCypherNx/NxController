@@ -44,7 +44,8 @@
     },
     "error": {
       "invalid_auth": "Credenciais inválidas.",
-      "cannot_connect": "Não foi possível conectar ao controlador."
+      "cannot_connect": "Não foi possível conectar ao controlador.",
+      "unknown": "Ocorreu um erro inesperado. Verifique os logs e tente novamente."
     }
   },
   "options": {
