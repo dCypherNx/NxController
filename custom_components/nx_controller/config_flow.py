@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import logging
 import re
 from typing import Any
 
@@ -37,6 +38,9 @@ from .const import (
     SOURCE_TYPE_OPENWRT,
     SOURCE_TYPE_SSH,
 )
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -99,13 +103,31 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             source_type = user_input.get(CONF_SOURCE_TYPE, SOURCE_TYPE_OPENWRT)
             cleaned_host = _normalize_host(user_input[CONF_HOST])
 
+            _LOGGER.debug(
+                "Config flow step %s: validating source type=%s host=%s name=%s",
+                step_id,
+                source_type,
+                cleaned_host,
+                user_input.get(CONF_SOURCE_NAME),
+            )
+
             client = self._build_client(cleaned_host, source_type, user_input)
 
             try:
                 await client.async_validate()
             except OpenWrtAuthError:
+                _LOGGER.warning(
+                    "Authentication failed during validation for host %s (%s)",
+                    cleaned_host,
+                    source_type,
+                )
                 errors["base"] = "invalid_auth"
             except OpenWrtConnectionError:
+                _LOGGER.warning(
+                    "Connection failed during validation for host %s (%s)",
+                    cleaned_host,
+                    source_type,
+                )
                 errors["base"] = "cannot_connect"
 
             if not errors:
@@ -122,6 +144,14 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
 
                 self._sources.append(source)
+
+                _LOGGER.debug(
+                    "Config flow step %s: added source %s (%s); total sources=%d",
+                    step_id,
+                    source_name,
+                    source_type,
+                    len(self._sources),
+                )
 
                 return await self.async_step_add_source_prompt()
 
