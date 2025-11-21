@@ -16,7 +16,7 @@
           "ssh_command": "Comando SSH preferencial",
           "ssh_commands": "Comandos SSH (um por linha)",
           "update_interval": "Intervalo de atualização (s)",
-          "hint": "Deixe os comandos em branco para usar tentativas padrão como 'iwinfo wl0 assoclist'."
+          "hint": "Deixe os comandos em branco para usar tentativas padrão como 'iw dev' que detectam interfaces disponíveis."
         }
       },
       "add_source": {

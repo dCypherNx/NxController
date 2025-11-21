@@ -16,7 +16,7 @@
           "ssh_command": "Preferred SSH command",
           "ssh_commands": "SSH commands (one per line)",
           "update_interval": "Update interval (s)",
-          "hint": "Leave commands blank to try defaults such as 'iwinfo wl0 assoclist'."
+          "hint": "Leave commands blank to try defaults such as 'iw dev' that discover available interfaces."
         }
       },
       "add_source": {
