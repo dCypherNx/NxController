@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
@@ -9,7 +10,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import OpenWrtAuthError, OpenWrtClient, OpenWrtError, SSHAccessPointClient
+from .api import (
+    OpenWrtAuthError,
+    OpenWrtClient,
+    OpenWrtError,
+    SSHAccessPointClient,
+    _normalize_host,
+)
 from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_SOURCES,
@@ -160,6 +167,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old config entry versions."""
+
+    version = entry.version
+
+    if version > 1:
+        return True
+
+    data: dict[str, Any] = {**entry.data}
+
+    if version == 1:
+        normalized_sources: list[dict[str, Any]] = []
+        if sources := data.get(CONF_SOURCES):
+            for source in sources:
+                normalized_sources.append(_normalize_source(source))
+        else:
+            normalized_sources.append(
+                _normalize_source(
+                    {
+                        CONF_SOURCE_TYPE: SOURCE_TYPE_OPENWRT,
+                        CONF_SOURCE_NAME: data.get(CONF_SOURCE_NAME)
+                        or data.get(CONF_HOST, "Nx Controller"),
+                        CONF_HOST: data.get(CONF_HOST, ""),
+                        CONF_USERNAME: data.get(CONF_USERNAME, ""),
+                        CONF_PASSWORD: data.get(CONF_PASSWORD, ""),
+                        CONF_USE_SSL: data.get(CONF_USE_SSL, True),
+                        CONF_VERIFY_SSL: data.get(CONF_VERIFY_SSL, True),
+                    }
+                )
+            )
+
+        data[CONF_SOURCES] = normalized_sources
+
+        hass.config_entries.async_update_entry(
+            entry,
+            data=data,
+            unique_id=_normalize_host(entry.unique_id) if entry.unique_id else None,
+        )
+        entry.version = 2
+
+    return True
+
+
+def _normalize_source(source: dict[str, Any]) -> dict[str, Any]:
+    """Normalize host-related fields for a source definition."""
+
+    cleaned_source = {**source}
+    if host := source.get(CONF_HOST):
+        cleaned_source[CONF_HOST] = _normalize_host(host)
+    return cleaned_source
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
