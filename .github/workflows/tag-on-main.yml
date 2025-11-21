@@ -22,12 +22,12 @@ jobs:
         id: version
         run: |
           VERSION=$(python - <<'PY'
-            import json
-            from pathlib import Path
-            manifest = json.loads(Path("custom_components/nx_controller/manifest.json").read_text())
-            print(manifest.get("version", "").strip())
-            PY
-            )
+import json
+from pathlib import Path
+manifest = json.loads(Path("custom_components/nx_controller/manifest.json").read_text())
+print(manifest.get("version", "").strip())
+PY
+          )
           if [ -z "$VERSION" ]; then
             echo "Unable to determine version from manifest." >&2
             exit 1
