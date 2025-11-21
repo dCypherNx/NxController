@@ -1,60 +1,20 @@
 {
+  "title": "Nx Controller",
   "config": {
     "step": {
       "user": {
-        "title": "Adicionar fonte de dispositivos",
-        "description": "Cadastre um endpoint ubus ou um AP acessível por SSH para o Nx Controller.",
+        "title": "Nx Controller",
+        "description": "Provide the IP address of the router or access point.",
         "data": {
-          "type": "Tipo de fonte",
-          "host": "Host ou IP",
-          "name": "Nome da fonte",
-          "username": "Usuário",
-          "password": "Senha",
-          "use_ssl": "Usar HTTPS",
-          "verify_ssl": "Validar certificado SSL",
-          "port": "Porta SSH",
-          "ssh_command": "Comando SSH preferencial",
-          "ssh_commands": "Comandos SSH (um por linha)",
-          "update_interval": "Intervalo de atualização (s)",
-          "hint": "Deixe os comandos em branco para usar tentativas padrão como 'iw dev' que detectam interfaces disponíveis."
-        }
-      },
-      "add_source": {
-        "title": "Adicionar outra fonte de dispositivos",
-        "description": "Cadastre outra conexão ubus ou um AP via SSH para enriquecer os dispositivos no Nx Controller.",
-        "data": {
-          "type": "Tipo de fonte",
-          "host": "Host ou IP",
-          "name": "Nome da fonte",
-          "username": "Usuário",
-          "password": "Senha",
-          "use_ssl": "Usar HTTPS",
-          "verify_ssl": "Validar certificado SSL",
-          "port": "Porta SSH",
-          "ssh_command": "Comando SSH preferencial",
-          "ssh_commands": "Comandos SSH (um por linha)"
-        }
-      },
-      "add_source_prompt": {
-        "title": "Deseja adicionar outra fonte?",
-        "data": {
-          "add_more": "Adicionar mais fontes"
+          "host": "IP address"
         }
       }
-    },
-    "error": {
-      "invalid_auth": "Credenciais inválidas.",
-      "cannot_connect": "Não foi possível conectar ao controlador.",
-      "unknown": "Ocorreu um erro inesperado. Verifique os logs e tente novamente."
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Opções do Nx Controller",
-        "data": {
-          "update_interval": "Intervalo de atualização (s)"
-        }
+  "entity": {
+    "sensor": {
+      "router_ip": {
+        "name": "IP Address"
       }
     }
   }

@@ -1,13 +1,11 @@
 # Nx Controller
 
-Custom Home Assistant integration that aggregates device presence and metadata from OpenWrt routers and SSH-accessible access points.
+Prova de conceito de uma integração mínima para Home Assistant. A configuração cria uma única entidade de sensor que apenas refletirá o endereço IP informado para o roteador ou ponto de acesso. Nenhum tráfego ou comando é enviado ao dispositivo.
 
-## Setup
-1. In Home Assistant, go to **Settings → Devices & Services → Add Integration** and choose **Nx Controller**.
-2. Provide the connection details requested by the wizard:
-   - **Host or IP**, **Username**, and **Password** of your OpenWrt controller or SSH-capable access point.
-   - Optional TLS verification (for ubus) or SSH parameters (port and commands) depending on the chosen source type.
-   - An optional custom name for each source and the desired update interval.
-3. After the first source is validated you can add additional sources before finishing the flow.
+## Instalação
+1. Copie a pasta `custom_components/nx_controller` para o diretório `custom_components` do seu Home Assistant.
+2. Reinicie o Home Assistant.
+3. Acesse **Configurações → Dispositivos e Serviços → Adicionar Integração** e escolha **Nx Controller**.
+4. Informe o endereço IP do roteador/AP e conclua o assistente.
 
-If the dialog does not prompt for host/username/password, ensure the integration is up to date and re-open the setup from the Integrations page.
+O resultado será um dispositivo com um único sensor exibindo o IP fornecido, sem qualquer comunicação adicional.
