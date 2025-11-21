@@ -44,7 +44,8 @@
     },
     "error": {
       "invalid_auth": "Invalid credentials.",
-      "cannot_connect": "Failed to connect to the controller."
+      "cannot_connect": "Failed to connect to the controller.",
+      "unknown": "An unexpected error occurred. Check the logs and try again."
     }
   },
   "options": {
