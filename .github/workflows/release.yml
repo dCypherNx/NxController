@@ -1,0 +1,58 @@
+name: Release on tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read manifest version
+        id: manifest
+        run: |
+          VERSION=$(python - <<'PY'
+import json
+from pathlib import Path
+manifest = json.loads(Path("custom_components/nx_controller/manifest.json").read_text())
+print(manifest.get("version", "").strip())
+PY
+          )
+          if [ -z "$VERSION" ]; then
+            echo "Unable to determine version from manifest." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate tag matches manifest
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          VERSION="v${{ steps.manifest.outputs.version }}"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag $TAG does not match manifest version $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Prepare release archive
+        id: package
+        run: |
+          VERSION="${{ steps.manifest.outputs.version }}"
+          ARCHIVE="nx-controller-${VERSION}.zip"
+          zip -r "$ARCHIVE" custom_components README.md hacs.json
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generateReleaseNotes: true
+          artifacts: ${{ steps.package.outputs.archive }}
