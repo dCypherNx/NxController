@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,7 +56,7 @@ class OpenWrtClient:
         session: aiohttp.ClientSession | None = None,
         timeout: int = 10,
     ) -> None:
-        self._host = host
+        self._host = _normalize_host(host)
         self._username = username
         self._password = password
         self._use_ssl = use_ssl
@@ -245,7 +246,7 @@ class SSHAccessPointClient:
         commands: list[str] | None = None,
         timeout: int = 10,
     ) -> None:
-        self._host = host
+        self._host = _normalize_host(host)
         self._username = username
         self._password = password
         self._port = port
@@ -360,3 +361,14 @@ class SSHAccessPointClient:
                 current["attributes"]["tx_info"] = stripped[3:].strip()
 
         return clients
+
+
+def _normalize_host(raw_host: str) -> str:
+    """Strip protocols/trailing slashes to normalize host values."""
+
+    cleaned = raw_host.strip()
+    parsed = urlparse(cleaned)
+    if parsed.scheme:
+        cleaned = parsed.netloc or parsed.path
+    cleaned = re.sub(r"^https?://", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.rstrip("/")
