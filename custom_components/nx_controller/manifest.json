@@ -1,12 +1,12 @@
 {
   "domain": "nx_controller",
   "name": "Nx Controller",
-  "version": "0.2.7",
+  "version": "0.1.0",
   "documentation": "https://github.com/openai-assistant/NxController",
-  "requirements": ["asyncssh>=2.14.2"],
+  "requirements": [],
   "codeowners": ["@openai-assistant"],
   "config_flow": true,
-  "iot_class": "local_polling",
+  "iot_class": "local_push",
   "integration_type": "hub",
   "loggers": ["custom_components.nx_controller"]
 }
