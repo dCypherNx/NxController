@@ -1,7 +1,7 @@
 {
   "domain": "nx_controller",
   "name": "Nx Controller",
-  "version": "0.2.0",
+  "version": "0.2.4",
   "documentation": "https://github.com/openai-assistant/NxController",
   "requirements": ["asyncssh>=2.14.2"],
   "codeowners": ["@openai-assistant"],

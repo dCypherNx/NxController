@@ -14,12 +14,13 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
+    DEFAULT_SSH_COMMAND,
+    DEFAULT_SSH_COMMANDS,
     OpenWrtAuthError,
     OpenWrtClient,
     OpenWrtConnectionError,
     SSHAccessPointClient,
-    DEFAULT_SSH_COMMAND,
-    DEFAULT_SSH_COMMANDS,
+    _normalize_host,
 )
 from .const import (
     CONF_UPDATE_INTERVAL,
@@ -41,7 +42,7 @@ from .const import (
 class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the Nx Controller config flow."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         self._sources: list[dict[str, Any]] = []
@@ -58,6 +59,7 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             source_type = user_input.get(CONF_SOURCE_TYPE, SOURCE_TYPE_OPENWRT)
+            cleaned_host = _normalize_host(user_input[CONF_HOST])
 
             client: OpenWrtClient | SSHAccessPointClient
             if source_type == SOURCE_TYPE_OPENWRT:
@@ -65,7 +67,7 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 verify_ssl = user_input.get(CONF_VERIFY_SSL, True)
 
                 client = OpenWrtClient(
-                    host=user_input[CONF_HOST],
+                    host=cleaned_host,
                     username=user_input[CONF_USERNAME],
                     password=user_input[CONF_PASSWORD],
                     use_ssl=use_ssl,
@@ -76,7 +78,7 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             else:
                 client = SSHAccessPointClient(
-                    host=user_input[CONF_HOST],
+                    host=cleaned_host,
                     username=user_input[CONF_USERNAME],
                     password=user_input[CONF_PASSWORD],
                     port=user_input.get(CONF_PORT, 22),
@@ -93,16 +95,16 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if not errors:
                 if self._primary_host is None:
-                    self._primary_host = user_input[CONF_HOST]
+                    self._primary_host = cleaned_host
                     await self.async_set_unique_id(self._primary_host)
                     self._abort_if_unique_id_configured()
 
-                source_name = user_input.get(CONF_SOURCE_NAME) or user_input[CONF_HOST]
+                source_name = user_input.get(CONF_SOURCE_NAME) or cleaned_host
 
                 source: dict[str, Any] = {
                     CONF_SOURCE_TYPE: source_type,
                     CONF_SOURCE_NAME: source_name,
-                    CONF_HOST: user_input[CONF_HOST],
+                    CONF_HOST: cleaned_host,
                     CONF_USERNAME: user_input[CONF_USERNAME],
                     CONF_PASSWORD: user_input[CONF_PASSWORD],
                 }
@@ -182,6 +184,7 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             source_type = user_input.get(CONF_SOURCE_TYPE, SOURCE_TYPE_OPENWRT)
+            cleaned_host = _normalize_host(user_input[CONF_HOST])
 
             client: OpenWrtClient | SSHAccessPointClient
             if source_type == SOURCE_TYPE_OPENWRT:
@@ -189,7 +192,7 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 verify_ssl = user_input.get(CONF_VERIFY_SSL, True)
 
                 client = OpenWrtClient(
-                    host=user_input[CONF_HOST],
+                    host=cleaned_host,
                     username=user_input[CONF_USERNAME],
                     password=user_input[CONF_PASSWORD],
                     use_ssl=use_ssl,
@@ -200,7 +203,7 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             else:
                 client = SSHAccessPointClient(
-                    host=user_input[CONF_HOST],
+                    host=cleaned_host,
                     username=user_input[CONF_USERNAME],
                     password=user_input[CONF_PASSWORD],
                     port=user_input.get(CONF_PORT, 22),
@@ -216,11 +219,11 @@ class OpenWrtConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
 
             if not errors:
-                source_name = user_input.get(CONF_SOURCE_NAME) or user_input[CONF_HOST]
+                source_name = user_input.get(CONF_SOURCE_NAME) or cleaned_host
                 source: dict[str, Any] = {
                     CONF_SOURCE_TYPE: source_type,
                     CONF_SOURCE_NAME: source_name,
-                    CONF_HOST: user_input[CONF_HOST],
+                    CONF_HOST: cleaned_host,
                     CONF_USERNAME: user_input[CONF_USERNAME],
                     CONF_PASSWORD: user_input[CONF_PASSWORD],
                 }

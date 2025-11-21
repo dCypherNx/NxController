@@ -17,7 +17,7 @@ Custom Home Assistant integration that aggregates device presence and metadata f
 2. Add at least one source:
    - **ubus/OpenWrt**: Provide host, username, password, and SSL preferences.
    - **SSH AP**: Provide host, username, password, and (optionally) port.
-3. SSH sources default to common discovery commands (`iwinfo wl0 assoclist`, `iwinfo wlan0 assoclist`, `iw dev wlan0 station dump`).
+3. SSH sources default to discovery commands that start with `iw dev` to list interfaces and then probe each one (e.g., `iwinfo {iface} assoclist`, `iw dev {iface} station dump`).
    - You can set a preferred command and/or supply a custom list (one per line). The integration will try each command in order until it collects data.
 4. Optionally add multiple sources; device attributes merge when the same MAC is found.
 5. Adjust the update interval in the options flow if needed.

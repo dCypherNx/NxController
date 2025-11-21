@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,11 +24,20 @@ class OpenWrtConnectionError(OpenWrtError):
     """Connection errors while talking to OpenWrt."""
 
 
+_LOGGER = logging.getLogger(__name__)
+
+DEFAULT_SSH_DISCOVERY_COMMAND = "iw dev"
 DEFAULT_SSH_COMMAND = "iwinfo wl0 assoclist"
 DEFAULT_SSH_COMMANDS = [
+    DEFAULT_SSH_DISCOVERY_COMMAND,
     DEFAULT_SSH_COMMAND,
     "iwinfo wlan0 assoclist",
     "iw dev wlan0 station dump",
+]
+
+INTERFACE_COMMAND_TEMPLATES = [
+    "iwinfo {interface} assoclist",
+    "iw dev {interface} station dump",
 ]
 
 
@@ -55,7 +66,7 @@ class OpenWrtClient:
         session: aiohttp.ClientSession | None = None,
         timeout: int = 10,
     ) -> None:
-        self._host = host
+        self._host = _normalize_host(host)
         self._username = username
         self._password = password
         self._use_ssl = use_ssl
@@ -245,7 +256,7 @@ class SSHAccessPointClient:
         commands: list[str] | None = None,
         timeout: int = 10,
     ) -> None:
-        self._host = host
+        self._host = _normalize_host(host)
         self._username = username
         self._password = password
         self._port = port
@@ -256,6 +267,9 @@ class SSHAccessPointClient:
             cleaned_commands = [command]
         if not cleaned_commands:
             cleaned_commands = DEFAULT_SSH_COMMANDS
+        elif DEFAULT_SSH_DISCOVERY_COMMAND not in cleaned_commands:
+            cleaned_commands.insert(0, DEFAULT_SSH_DISCOVERY_COMMAND)
+
         self._commands = cleaned_commands
         self._timeout = timeout
 
@@ -269,15 +283,33 @@ class SSHAccessPointClient:
 
         clients_by_mac: dict[str, dict[str, Any]] = {}
         last_error: Exception | None = None
+        discovered_interfaces: set[str] = set()
+        commands_to_try = list(self._commands)
 
-        for command in self._commands:
+        while commands_to_try:
+            command = commands_to_try.pop(0)
             try:
                 output = await self._async_run_command(command)
             except Exception as err:  # pylint: disable=broad-except
                 last_error = err
                 continue
 
-            for device in self._parse_assoclist_output(output):
+            if _is_iw_dev_listing(command):
+                interfaces = self._parse_interfaces(output)
+                if interfaces:
+                    _LOGGER.debug(
+                        "Discovered wireless interfaces on %s: %s",
+                        self._host,
+                        ", ".join(sorted(interfaces)),
+                    )
+                new_commands = self._build_interface_commands(
+                    interfaces, discovered_interfaces, commands_to_try
+                )
+                commands_to_try.extend(new_commands)
+                continue
+
+            interface = _extract_interface_from_command(command)
+            for device in self._parse_assoclist_output(output, interface):
                 mac = device.get("mac")
                 if not mac:
                     continue
@@ -318,7 +350,9 @@ class SSHAccessPointClient:
 
         return result.stdout
 
-    def _parse_assoclist_output(self, output: str) -> list[dict[str, Any]]:
+    def _parse_assoclist_output(
+        self, output: str, interface: str | None = None
+    ) -> list[dict[str, Any]]:
         """Parse iwinfo assoclist output into device dictionaries."""
 
         clients: list[dict[str, Any]] = []
@@ -344,7 +378,7 @@ class SSHAccessPointClient:
                     "mac": mac,
                     "hostname": None,
                     "ip_address": None,
-                    "interface": None,
+                    "interface": interface,
                     "connected": True,
                     "attributes": attributes,
                 }
@@ -360,3 +394,81 @@ class SSHAccessPointClient:
                 current["attributes"]["tx_info"] = stripped[3:].strip()
 
         return clients
+
+    def _parse_interfaces(self, output: str) -> set[str]:
+        """Return interface names discovered from `iw dev` output."""
+
+        interfaces: set[str] = set()
+        for line in output.splitlines():
+            line = line.strip()
+            if not line or "Interface" not in line:
+                continue
+            if match := re.search(r"Interface\s+(?P<iface>[\w.-]+)", line):
+                interfaces.add(match.group("iface"))
+
+        return interfaces
+
+    def _build_interface_commands(
+        self,
+        interfaces: set[str],
+        discovered_interfaces: set[str],
+        pending_commands: list[str],
+    ) -> list[str]:
+        """Prepare per-interface commands derived from discovered interfaces."""
+
+        new_commands: list[str] = []
+
+        for iface in interfaces:
+            if iface in discovered_interfaces:
+                continue
+            discovered_interfaces.add(iface)
+            for template in INTERFACE_COMMAND_TEMPLATES:
+                formatted = template.format(interface=iface)
+                if formatted in self._commands or formatted in pending_commands:
+                    continue
+                new_commands.append(formatted)
+
+        return new_commands
+
+
+def _is_iw_dev_listing(command: str) -> bool:
+    """Return True if the command lists interfaces using `iw dev`."""
+
+    normalized = command.strip().lower()
+    if "station dump" in normalized:
+        return False
+    return normalized == "iw dev" or normalized.startswith("iw dev ")
+
+
+def _extract_interface_from_command(command: str) -> str | None:
+    """Try to infer an interface name from iw/iwinfo commands."""
+
+    normalized = command.strip()
+    if not normalized:
+        return None
+
+    if match := re.search(r"^iw\s+dev\s+(?P<iface>[\w.-]+)", normalized, re.IGNORECASE):
+        return match.group("iface")
+
+    if match := re.search(r"^iwinfo\s+(?P<iface>[\w.-]+)", normalized, re.IGNORECASE):
+        return match.group("iface")
+
+    return None
+
+
+def _normalize_host(raw_host: str) -> str:
+    """Strip protocols/trailing slashes to normalize host values."""
+
+    cleaned = raw_host.strip()
+    parsed = urlparse(cleaned)
+
+    # If the user included a path without a scheme (e.g. 192.168.1.1/cgi-bin/luci),
+    # urlparse will place everything in ``path``. Prefixing with ``//`` lets us use
+    # ``netloc`` to reliably grab the host:port portion.
+    if parsed.scheme:
+        cleaned = parsed.netloc or parsed.path
+    elif parsed.path and "/" in parsed.path:
+        cleaned = urlparse(f"//{cleaned}").netloc
+
+    cleaned = re.sub(r"^https?://", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.rstrip("/")
