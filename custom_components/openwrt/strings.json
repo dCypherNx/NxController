@@ -1,0 +1,57 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Adicionar fonte de dispositivos",
+        "description": "Cadastre um endpoint ubus OpenWrt ou um AP acessível por SSH.",
+        "data": {
+          "type": "Tipo de fonte",
+          "host": "Host ou IP",
+          "name": "Nome da fonte",
+          "username": "Usuário",
+          "password": "Senha",
+          "use_ssl": "Usar HTTPS",
+          "verify_ssl": "Validar certificado SSL",
+          "port": "Porta SSH",
+          "ssh_command": "Comando SSH (ex: iwinfo wl0 assoclist)",
+          "update_interval": "Intervalo de atualização (s)"
+        }
+      },
+      "add_source": {
+        "title": "Adicionar outra fonte de dispositivos",
+        "description": "Cadastre outra conexão ubus ou um AP via SSH para enriquecer os dispositivos.",
+        "data": {
+          "type": "Tipo de fonte",
+          "host": "Host ou IP",
+          "name": "Nome da fonte",
+          "username": "Usuário",
+          "password": "Senha",
+          "use_ssl": "Usar HTTPS",
+          "verify_ssl": "Validar certificado SSL",
+          "port": "Porta SSH",
+          "ssh_command": "Comando SSH (ex: iwinfo wl0 assoclist)"
+        }
+      },
+      "add_source_prompt": {
+        "title": "Deseja adicionar outra fonte?",
+        "data": {
+          "add_more": "Adicionar mais fontes"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Credenciais inválidas.",
+      "cannot_connect": "Não foi possível conectar ao roteador."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções do OpenWrt",
+        "data": {
+          "update_interval": "Intervalo de atualização (s)"
+        }
+      }
+    }
+  }
+}
