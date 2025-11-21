@@ -12,6 +12,12 @@ Custom Home Assistant integration that aggregates device presence and metadata f
 2. Add this repository as a custom integration in HACS.
 3. Install **Nx Controller** and restart Home Assistant.
 
+## Release flow
+1. Update `custom_components/nx_controller/manifest.json` with the new semantic version.
+2. Commit the change and push it to the default branch.
+3. Tag the commit with the same version prefixed by `v` (for example, `v0.2.5`) and push the tag.
+4. GitHub Actions will build a ZIP archive containing `custom_components`, `README.md`, and `hacs.json`, then publish a release that HACS can consume.
+
 ## Configuration
 1. In Home Assistant, go to **Settings → Devices & Services → Add Integration** and search for **Nx Controller**.
 2. Add at least one source:
