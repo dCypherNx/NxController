@@ -1,0 +1,57 @@
+name: Release on tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read manifest version
+        id: manifest
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'custom_components/nx_controller/manifest.json';
+            const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const version = (manifest.version || '').trim();
+            if (!version) {
+              core.setFailed('Unable to determine version from manifest');
+              return;
+            }
+            core.setOutput('version', version);
+
+      - name: Validate tag matches manifest
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          EXPECTED="v${{ steps.manifest.outputs.version }}"
+          if [ "$TAG" != "$EXPECTED" ]; then
+            echo "Tag $TAG does not match manifest version $EXPECTED" >&2
+            exit 1
+          fi
+
+      - name: Prepare release archive
+        id: package
+        run: |
+          VERSION="${{ steps.manifest.outputs.version }}"
+          ARCHIVE="nx-controller-${VERSION}.zip"
+          zip -r "$ARCHIVE" custom_components README.md hacs.json
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generateReleaseNotes: true
+          artifacts: ${{ steps.package.outputs.archive }}

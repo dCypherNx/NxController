@@ -1,0 +1,65 @@
+name: Create version tag
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tag-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read manifest version
+        id: manifest
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'custom_components/nx_controller/manifest.json';
+            const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const version = (manifest.version || '').trim();
+            if (!version) {
+              core.setFailed('Unable to determine version from manifest');
+              return;
+            }
+            core.setOutput('version', version);
+
+      - name: Check if tag exists
+        id: tag
+        run: |
+          TAG="v${{ steps.manifest.outputs.version }}"
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag for version
+        if: steps.tag.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ steps.manifest.outputs.version }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = `v${process.env.VERSION}`;
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/${tag}`,
+              sha: context.sha,
+            });
+            core.info(`Created tag ${tag}.`);
+
+      - name: Log existing tag
+        if: steps.tag.outputs.exists == 'true'
+        run: echo "Tag v${{ steps.manifest.outputs.version }} already exists; skipping creation."
