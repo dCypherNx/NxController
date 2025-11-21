@@ -4,17 +4,25 @@
     "step": {
       "user": {
         "title": "Nx Controller",
-        "description": "Provide the IP address of the router or access point.",
+        "description": "Provide SSH credentials to reach the controller.",
         "data": {
-          "host": "IP address"
+          "host": "IP address",
+          "username": "Username",
+          "password": "Password"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the controller. Verify host and credentials."
     }
   },
   "entity": {
     "sensor": {
       "router_ip": {
         "name": "IP Address"
+      },
+      "connected_device": {
+        "name": "Connected Device"
       }
     }
   }

@@ -3,7 +3,7 @@
   "name": "Nx Controller",
   "version": "0.1.0",
   "documentation": "https://github.com/openai-assistant/NxController",
-  "requirements": [],
+  "requirements": ["asyncssh==2.14.2"],
   "codeowners": ["@openai-assistant"],
   "config_flow": true,
   "iot_class": "local_push",
