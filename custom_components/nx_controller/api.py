@@ -461,7 +461,14 @@ def _normalize_host(raw_host: str) -> str:
 
     cleaned = raw_host.strip()
     parsed = urlparse(cleaned)
+
+    # If the user included a path without a scheme (e.g. 192.168.1.1/cgi-bin/luci),
+    # urlparse will place everything in ``path``. Prefixing with ``//`` lets us use
+    # ``netloc`` to reliably grab the host:port portion.
     if parsed.scheme:
         cleaned = parsed.netloc or parsed.path
+    elif parsed.path and "/" in parsed.path:
+        cleaned = urlparse(f"//{cleaned}").netloc
+
     cleaned = re.sub(r"^https?://", "", cleaned, flags=re.IGNORECASE)
     return cleaned.rstrip("/")
