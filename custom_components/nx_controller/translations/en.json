@@ -1,0 +1,60 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add device source",
+        "description": "Provide credentials for a ubus endpoint or SSH-accessible AP for Nx Controller.",
+        "data": {
+          "type": "Source type",
+          "host": "Host or IP",
+          "name": "Source name",
+          "username": "Username",
+          "password": "Password",
+          "use_ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate",
+          "port": "SSH port",
+          "ssh_command": "Preferred SSH command",
+          "ssh_commands": "SSH commands (one per line)",
+          "update_interval": "Update interval (s)",
+          "hint": "Leave commands blank to try defaults such as 'iwinfo wl0 assoclist'."
+        }
+      },
+      "add_source": {
+        "title": "Add another device source",
+        "description": "Register another ubus connection or SSH AP to enrich device data in Nx Controller.",
+        "data": {
+          "type": "Source type",
+          "host": "Host or IP",
+          "name": "Source name",
+          "username": "Username",
+          "password": "Password",
+          "use_ssl": "Use HTTPS",
+          "verify_ssl": "Verify SSL certificate",
+          "port": "SSH port",
+          "ssh_command": "Preferred SSH command",
+          "ssh_commands": "SSH commands (one per line)"
+        }
+      },
+      "add_source_prompt": {
+        "title": "Add another source?",
+        "data": {
+          "add_more": "Add more sources"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials.",
+      "cannot_connect": "Failed to connect to the controller."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nx Controller options",
+        "data": {
+          "update_interval": "Update interval (s)"
+        }
+      }
+    }
+  }
+}
