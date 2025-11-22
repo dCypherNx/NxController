@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.0.alpha001
+- Incremento de versão para a release 0.2.0.alpha001.
+
 ## 0.1.1
 - IDs de sensores agora utilizam invariavelmente o endereço MAC reportado pelo
   controlador como identificador único.

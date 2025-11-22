@@ -19,7 +19,7 @@ def _device_info(entry: ConfigEntry) -> dict[str, Any]:
     return {
         "identifiers": {(DOMAIN, entry.entry_id)},
         "manufacturer": "Nx Controller",
-        "model": "POC",
+        "model": "Nx Controller",
         "name": entry.title,
     }
 
@@ -190,6 +190,7 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
             "radios": device.get("radios", []),
             "ipv4_addresses": device.get("ipv4_addresses", []),
             "ipv6_addresses": device.get("ipv6_addresses", []),
+            "hostname": device.get("name"),
             "host": device.get("host"),
             "mac_address": self._primary_mac,
             "mac_addresses": device.get("mac_addresses", [self._primary_mac]),
