@@ -4,12 +4,18 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
   release:
     types: [published]
   workflow_dispatch:
 
 jobs:
   build-and-upload:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write
