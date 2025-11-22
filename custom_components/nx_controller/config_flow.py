@@ -7,7 +7,12 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD, CONF_USERNAME
 
 from .api import NxSSHClient, NxSSHError
-from .const import CONF_SSH_PASSWORD, CONF_SSH_USERNAME, DOMAIN
+from .const import (
+    CONF_IS_DHCP_PROVIDER,
+    CONF_SSH_PASSWORD,
+    CONF_SSH_USERNAME,
+    DOMAIN,
+)
 
 
 class NxControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -23,6 +28,7 @@ class NxControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             host = str(user_input[CONF_HOST]).strip()
             username = str(user_input[CONF_USERNAME]).strip()
             password = str(user_input[CONF_PASSWORD])
+            is_dhcp_provider = bool(user_input.get(CONF_IS_DHCP_PROVIDER, False))
             client = NxSSHClient(host, username, password)
 
             try:
@@ -39,6 +45,7 @@ class NxControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_HOST: host,
                         CONF_SSH_USERNAME: username,
                         CONF_SSH_PASSWORD: password,
+                        CONF_IS_DHCP_PROVIDER: is_dhcp_provider,
                     },
                 )
 
@@ -50,6 +57,7 @@ class NxControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_HOST): cv.string,
                     vol.Required(CONF_USERNAME): cv.string,
                     vol.Required(CONF_PASSWORD): cv.string,
+                    vol.Optional(CONF_IS_DHCP_PROVIDER, default=False): cv.boolean,
                 }
             ),
             errors=errors,

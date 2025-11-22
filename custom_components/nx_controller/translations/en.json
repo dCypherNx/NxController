@@ -8,7 +8,8 @@
         "data": {
           "host": "IP address",
           "username": "Username",
-          "password": "Password"
+          "password": "Password",
+          "is_dhcp_provider": "Provides DHCP for the network"
         }
       }
     },
