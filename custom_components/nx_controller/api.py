@@ -40,8 +40,12 @@ class NxSSHClient:
         self.username = username
         self.password = password
 
-    async def fetch_interface_devices(self) -> dict[str, Any]:
-        """Return the list of interfaces and the devices connected to them."""
+    async def fetch_interface_devices(self, collect_dhcp: bool = False) -> dict[str, Any]:
+        """Return the list of interfaces and the devices connected to them.
+
+        When ``collect_dhcp`` is True, DHCP configuration is also fetched using
+        ``uci show dhcp``.
+        """
 
         try:
             async with asyncssh.connect(
@@ -49,6 +53,9 @@ class NxSSHClient:
             ) as conn:
                 interfaces = await self._list_interfaces(conn)
                 devices = await self._collect_devices(conn, interfaces)
+                dhcp_config = (
+                    await self._collect_dhcp_config(conn) if collect_dhcp else None
+                )
         except (asyncssh.Error, OSError) as err:
             raise NxSSHError("Unable to communicate with the controller") from err
 
@@ -93,10 +100,15 @@ class NxSSHClient:
             for mac, value in aggregated_devices.items()
         }
 
-        return {
+        payload = {
             "interfaces": interfaces,
             "devices": devices_payload,
         }
+
+        if dhcp_config is not None:
+            payload["dhcp"] = dhcp_config
+
+        return payload
 
     async def _list_interfaces(self, conn: asyncssh.SSHClientConnection) -> list[str]:
         """Collect interface names from the controller."""
@@ -170,3 +182,64 @@ class NxSSHClient:
                     )
                 )
         return devices
+
+    async def _collect_dhcp_config(self, conn: asyncssh.SSHClientConnection) -> dict[str, Any]:
+        """Collect DHCP configuration using ``uci show dhcp``."""
+
+        result = await conn.run("uci show dhcp", check=False)
+        if result.exit_status != 0:
+            raise NxSSHError("Failed to obtain DHCP configuration")
+
+        sections: dict[str, dict[str, str]] = {}
+        for line in result.stdout.splitlines():
+            if not line.startswith("dhcp."):
+                continue
+
+            key, _, value = line.partition("=")
+            if not value:
+                continue
+
+            key_parts = key.split(".", 2)
+            if len(key_parts) < 3:
+                continue
+
+            _, section, option = key_parts
+            section_data = sections.setdefault(section, {})
+            section_data[option] = value.strip().strip("'\"")
+
+        dhcp_ranges: dict[str, dict[str, Any]] = {}
+        for section_data in sections.values():
+            interface = section_data.get("interface")
+            if not interface:
+                continue
+
+            start = self._as_int(section_data.get("start"))
+            limit = self._as_int(section_data.get("limit"))
+            leasetime = section_data.get("leasetime")
+
+            range_info: dict[str, Any] = {}
+            if start is not None:
+                range_info["start"] = start
+            if limit is not None:
+                range_info["limit"] = limit
+            if start is not None and limit is not None:
+                range_info["end"] = start + limit - 1
+            if leasetime:
+                range_info["leasetime"] = leasetime
+
+            if range_info:
+                dhcp_ranges[interface] = range_info
+
+        return dhcp_ranges
+
+    @staticmethod
+    def _as_int(value: str | None) -> int | None:
+        """Convert a value to int when possible."""
+
+        if value is None:
+            return None
+
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
