@@ -5,8 +5,12 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityAvailability
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN
@@ -21,6 +25,22 @@ def _device_info(entry: ConfigEntry) -> dict[str, Any]:
     }
 
 
+
+def _availability_from_coordinator(
+    coordinator: DataUpdateCoordinator,
+) -> EntityAvailability:
+    """Return availability details based on the coordinator status."""
+
+    if coordinator.last_update_success:
+        return EntityAvailability(available=True)
+
+    description = None
+    if coordinator.last_exception:
+        description = str(coordinator.last_exception)
+
+    return EntityAvailability(available=False, description=description)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -30,7 +50,7 @@ async def async_setup_entry(
     host = data["host"]
     coordinator = data["coordinator"]
 
-    router_sensor = NxControllerRouterSensor(entry, host)
+    router_sensor = NxControllerRouterSensor(entry, host, coordinator)
     device_entities = [
         NxControllerDeviceSensor(entry, coordinator, mac)
         for mac in coordinator.data.get("devices", {})
@@ -59,12 +79,23 @@ class NxControllerRouterSensor(SensorEntity):
     _attr_should_poll = False
     _attr_translation_key = "router_ip"
 
-    def __init__(self, entry: ConfigEntry, host: str) -> None:
+    def __init__(
+        self, entry: ConfigEntry, host: str, coordinator: DataUpdateCoordinator
+    ) -> None:
         self._entry = entry
+        self._coordinator = coordinator
         self._attr_unique_id = f"{entry.entry_id}_ip"
         self._attr_name = "IP Address"
         self._attr_native_value = host
         self._attr_device_info = _device_info(entry)
+
+    @property
+    def available(self) -> bool:
+        return self._coordinator.last_update_success
+
+    @property
+    def availability(self) -> EntityAvailability:
+        return _availability_from_coordinator(self._coordinator)
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
@@ -89,12 +120,18 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     _attr_should_poll = False
     _attr_translation_key = "connected_device"
 
-    def __init__(self, entry: ConfigEntry, coordinator, mac: str) -> None:
+    def __init__(
+        self, entry: ConfigEntry, coordinator: DataUpdateCoordinator, mac: str
+    ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._mac = mac
         self._attr_unique_id = mac
         self._attr_device_info = _device_info(entry)
+
+    @property
+    def availability(self) -> EntityAvailability:
+        return _availability_from_coordinator(self.coordinator)
 
     @property
     def name(self) -> str:
