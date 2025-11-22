@@ -168,33 +168,66 @@ class NxSSHClient:
 
         result = await conn.run(f"ip neigh show dev {interface}", check=False)
         if result.exit_status != 0:
-            return []
+            result = None
 
         devices: list[DiscoveredDevice] = []
-        for line in result.stdout.splitlines():
-            # Example: '192.168.1.10 dev eth0 lladdr 00:11:22:33:44:55 REACHABLE'
-            parts = line.split()
-            if not parts:
-                continue
-            ip = parts[0] if parts else None
-            mac: str | None = None
-            state: str | None = None
-            if "lladdr" in parts:
-                lladdr_index = parts.index("lladdr")
-                if lladdr_index + 1 < len(parts):
-                    mac = parts[lladdr_index + 1]
-            if parts:
-                state = parts[-1]
+        seen_macs: set[str] = set()
 
-            if mac:
+        if result and result.stdout:
+            for line in result.stdout.splitlines():
+                # Example: '192.168.1.10 dev eth0 lladdr 00:11:22:33:44:55 REACHABLE'
+                parts = line.split()
+                if not parts:
+                    continue
+                ip = parts[0] if parts else None
+                mac: str | None = None
+                state: str | None = None
+                if "lladdr" in parts:
+                    lladdr_index = parts.index("lladdr")
+                    if lladdr_index + 1 < len(parts):
+                        mac = parts[lladdr_index + 1]
+                if parts:
+                    state = parts[-1]
+
+                if mac:
+                    mac = mac.lower()
+                    seen_macs.add(mac)
+                    devices.append(
+                        DiscoveredDevice(
+                            mac=mac,
+                            interface=interface,
+                            ip=ip,
+                            state=state,
+                        )
+                    )
+
+        stations = await conn.run(
+            f"iw dev {interface} station dump", check=False
+        )
+        if stations.exit_status == 0 and stations.stdout:
+            for line in stations.stdout.splitlines():
+                stripped_line = line.strip()
+                if not stripped_line.lower().startswith("station "):
+                    continue
+
+                parts = stripped_line.split()
+                if len(parts) < 2:
+                    continue
+
+                mac = parts[1].lower()
+                if mac in seen_macs:
+                    continue
+
+                seen_macs.add(mac)
                 devices.append(
                     DiscoveredDevice(
-                        mac=mac.lower(),
+                        mac=mac,
                         interface=interface,
-                        ip=ip,
-                        state=state,
+                        ip=None,
+                        state=None,
                     )
                 )
+
         return devices
 
     async def _collect_dhcp_config(self, conn: asyncssh.SSHClientConnection) -> dict[str, Any]:

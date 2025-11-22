@@ -136,9 +136,14 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     @property
     def name(self) -> str:
         device = self.coordinator.data.get("devices", {}).get(self._mac, {})
+        mac_addresses = device.get("mac_addresses") or [self._mac]
+        primary_mac = mac_addresses[0]
         host = device.get("host")
         ipv4_addresses = device.get("ipv4_addresses") or []
         ipv6_addresses = device.get("ipv6_addresses") or []
+
+        if primary_mac:
+            return primary_mac
 
         if host:
             return host
