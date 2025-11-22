@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+- IDs de sensores agora utilizam invariavelmente o endereço MAC reportado pelo
+  controlador como identificador único.
+- Incremento de versão para a release 0.1.1.
+
 ## 0.1.0
 - Refatoração do coletor SSH para consolidar dispositivos WiFi e com fio de
   forma determinística e sem perdas.
