@@ -4,7 +4,7 @@ import voluptuous as vol
 
 import homeassistant.helpers.config_validation as cv
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD, CONF_USERNAME
 
 from .api import NxSSHClient, NxSSHError
 from .const import CONF_SSH_PASSWORD, CONF_SSH_USERNAME, DOMAIN
@@ -19,6 +19,7 @@ class NxControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
+            alias = str(user_input[CONF_NAME]).strip()
             host = str(user_input[CONF_HOST]).strip()
             username = str(user_input[CONF_USERNAME]).strip()
             password = str(user_input[CONF_PASSWORD])
@@ -32,8 +33,9 @@ class NxControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(host)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=host,
+                    title=alias,
                     data={
+                        CONF_NAME: alias,
                         CONF_HOST: host,
                         CONF_SSH_USERNAME: username,
                         CONF_SSH_PASSWORD: password,
@@ -44,6 +46,7 @@ class NxControllerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_NAME): cv.string,
                     vol.Required(CONF_HOST): cv.string,
                     vol.Required(CONF_USERNAME): cv.string,
                     vol.Required(CONF_PASSWORD): cv.string,
