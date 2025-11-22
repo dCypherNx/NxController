@@ -6,6 +6,7 @@
         "title": "Nx Controller",
         "description": "Provide SSH credentials to reach the controller.",
         "data": {
+          "name": "Nickname",
           "host": "IP address",
           "username": "Username",
           "password": "Password"
