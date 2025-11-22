@@ -35,7 +35,9 @@ async def async_setup_entry(
 
     router_sensor = NxControllerRouterSensor(entry, host, coordinator)
     device_entities = [
-        NxControllerDeviceSensor(entry, coordinator, mac)
+        NxControllerDeviceSensor(
+            entry, coordinator, mac, coordinator.data.get("devices", {}).get(mac, {})
+        )
         for mac in coordinator.data.get("devices", {})
     ]
 
@@ -45,7 +47,15 @@ async def async_setup_entry(
         new_devices = coordinator.data.get("devices", {})
         new_macs = set(new_devices) - known_macs
         if new_macs:
-            entities = [NxControllerDeviceSensor(entry, coordinator, mac) for mac in new_macs]
+            entities = [
+                NxControllerDeviceSensor(
+                    entry,
+                    coordinator,
+                    mac,
+                    new_devices.get(mac, {}),
+                )
+                for mac in new_macs
+            ]
             known_macs.update(new_macs)
             async_add_entities(entities)
 
@@ -100,22 +110,55 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     _attr_translation_key = "connected_device"
 
     def __init__(
-        self, entry: ConfigEntry, coordinator: DataUpdateCoordinator, mac: str
+        self,
+        entry: ConfigEntry,
+        coordinator: DataUpdateCoordinator,
+        device_key: str,
+        device_data: dict[str, Any],
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry
-        self._mac = mac
-        self._attr_unique_id = mac
+        self._device_key = device_key
+        mac_addresses = device_data.get("mac_addresses") or []
+        self._primary_mac = mac_addresses[0] if mac_addresses else device_key
+        self._attr_unique_id = self._primary_mac
         self._attr_device_info = _device_info(entry)
 
     @property
     def name(self) -> str:
-        device = self.coordinator.data.get("devices", {}).get(self._mac, {})
-        mac_addresses = device.get("mac_addresses") or [self._mac]
+        device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
+        mac_addresses = device.get("mac_addresses") or [self._primary_mac]
         primary_mac = mac_addresses[0]
         host = device.get("host")
         ipv4_addresses = device.get("ipv4_addresses") or []
         ipv6_addresses = device.get("ipv6_addresses") or []
+        dhcp_hosts = self.coordinator.data.get("dhcp", {}).get("hosts") or {}
+        dhcp_ip_map = {
+            info.get("ip"): info.get("name")
+            for info in dhcp_hosts.values()
+            if info.get("ip") and info.get("name")
+        }
+
+        dhcp_name: str | None = None
+        if dhcp_hosts:
+            for mac in mac_addresses:
+                host_info = dhcp_hosts.get(mac.lower())
+                if host_info and host_info.get("name"):
+                    dhcp_name = host_info["name"]
+                    break
+
+        if not dhcp_name and dhcp_ip_map:
+            for ip in ipv4_addresses:
+                name = dhcp_ip_map.get(ip)
+                if name:
+                    dhcp_name = name
+                    break
+
+        if dhcp_name:
+            return dhcp_name
+
+        if device.get("name"):
+            return device["name"]
 
         if primary_mac:
             return primary_mac
@@ -129,23 +172,24 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         if ipv6_addresses:
             return ipv6_addresses[0]
 
-        return self._mac
+        return self._primary_mac
 
     @property
     def native_value(self):
-        device = self.coordinator.data.get("devices", {}).get(self._mac, {})
+        device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
         return device.get("state")
 
     @property
     def extra_state_attributes(self):
-        device = self.coordinator.data.get("devices", {}).get(self._mac, {})
+        device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
         attributes = {
             "interfaces": device.get("interfaces", []),
+            "radios": device.get("radios", []),
             "ipv4_addresses": device.get("ipv4_addresses", []),
             "ipv6_addresses": device.get("ipv6_addresses", []),
             "host": device.get("host"),
-            "mac_address": self._mac,
-            "mac_addresses": device.get("mac_addresses", [self._mac]),
+            "mac_address": self._primary_mac,
+            "mac_addresses": device.get("mac_addresses", [self._primary_mac]),
         }
 
         for idx, mac in enumerate(attributes["mac_addresses"]):

@@ -52,6 +52,7 @@ class NxSSHClient:
                 self.host, username=self.username, password=self.password, known_hosts=None
             ) as conn:
                 interfaces = await self._list_interfaces(conn)
+                wifi_radios = await self._wifi_radios(conn)
                 devices = await self._collect_devices(conn, interfaces)
                 dhcp_config = (
                     await self._collect_dhcp_config(conn) if collect_dhcp else None
@@ -62,21 +63,37 @@ class NxSSHClient:
         aggregated_devices: dict[str, dict[str, Any]] = {}
         endpoint_to_primary_mac: dict[str, str] = {}
 
+        dhcp_hosts: dict[str, dict[str, Any]] = {}
+        dhcp_names_by_ip: dict[str, str] = {}
+        dhcp_ips_by_mac: dict[str, str] = {}
+
+        if dhcp_config:
+            dhcp_hosts = dhcp_config.get("hosts", {}) or {}
+            for mac, host in dhcp_hosts.items():
+                ip = host.get("ip")
+                name = host.get("name")
+                if ip and name:
+                    dhcp_names_by_ip[ip] = name
+                if ip:
+                    dhcp_ips_by_mac[mac] = ip
+
         for device in devices:
             identifier = device.ip or device.mac
             primary_mac = endpoint_to_primary_mac.get(identifier, device.mac)
 
-            entry = aggregated_devices.setdefault(
-                primary_mac,
-                {
-                    "interfaces": set(),
-                    "ipv4_addresses": set(),
-                    "ipv6_addresses": set(),
-                    "state": device.state,
-                    "host": None,
-                    "mac_addresses": [primary_mac],
-                },
-            )
+                entry = aggregated_devices.setdefault(
+                    primary_mac,
+                    {
+                        "interfaces": set(),
+                        "radios": set(),
+                        "ipv4_addresses": set(),
+                        "ipv6_addresses": set(),
+                        "state": device.state,
+                        "host": None,
+                        "mac_addresses": [primary_mac],
+                        "name": None,
+                    },
+                )
 
             if identifier not in endpoint_to_primary_mac:
                 endpoint_to_primary_mac[identifier] = primary_mac
@@ -88,6 +105,10 @@ class NxSSHClient:
 
             entry["interfaces"].add(device.interface)
 
+            radio = wifi_radios.get(device.interface)
+            if radio:
+                entry["radios"].add(radio)
+
             if device.ip:
                 try:
                     ip_obj = ipaddress.ip_address(device.ip)
@@ -98,18 +119,50 @@ class NxSSHClient:
                         entry["ipv4_addresses"].add(device.ip)
                     else:
                         entry["ipv6_addresses"].add(device.ip)
+            else:
+                for mac in entry["mac_addresses"]:
+                    dhcp_ip = dhcp_ips_by_mac.get(mac)
+                    if not dhcp_ip:
+                        continue
+                    try:
+                        ip_obj = ipaddress.ip_address(dhcp_ip)
+                    except ValueError:
+                        continue
+                    if ip_obj.version == 4:
+                        entry["ipv4_addresses"].add(dhcp_ip)
+                    else:
+                        entry["ipv6_addresses"].add(dhcp_ip)
 
             if device.state:
                 entry["state"] = device.state
 
+            dhcp_name: str | None = None
+            if dhcp_hosts:
+                for mac in entry["mac_addresses"]:
+                    host = dhcp_hosts.get(mac)
+                    if host and host.get("name"):
+                        dhcp_name = host["name"]
+                        break
+
+            if not dhcp_name and dhcp_names_by_ip:
+                for ipv4 in entry["ipv4_addresses"]:
+                    if ipv4 in dhcp_names_by_ip:
+                        dhcp_name = dhcp_names_by_ip[ipv4]
+                        break
+
+            if dhcp_name:
+                entry["name"] = dhcp_name
+
         devices_payload = {
             mac: {
                 "interfaces": sorted(value["interfaces"]),
+                "radios": sorted(value["radios"]),
                 "ipv4_addresses": sorted(value["ipv4_addresses"]),
                 "ipv6_addresses": sorted(value["ipv6_addresses"]),
                 "state": value.get("state"),
                 "host": value.get("host"),
                 "mac_addresses": value.get("mac_addresses", []),
+                "name": value.get("name"),
             }
             for mac, value in aggregated_devices.items()
         }
@@ -145,6 +198,35 @@ class NxSSHClient:
         if not interfaces:
             raise NxSSHError("No interfaces discovered")
         return interfaces
+
+    async def _wifi_radios(self, conn: asyncssh.SSHClientConnection) -> dict[str, str]:
+        """Map wireless interfaces to their radios (phys)."""
+
+        result = await conn.run("iw dev", check=False)
+        if result.exit_status != 0 or not result.stdout:
+            return {}
+
+        interface_to_radio: dict[str, str] = {}
+        current_radio: str | None = None
+
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("phy#"):
+                current_radio = stripped.replace("phy#", "phy", 1)
+                continue
+
+            if not stripped.startswith("Interface "):
+                continue
+
+            parts = stripped.split()
+            if len(parts) < 2:
+                continue
+
+            interface = parts[1]
+            if current_radio:
+                interface_to_radio[interface] = current_radio
+
+        return interface_to_radio
 
     async def _collect_devices(
         self, conn: asyncssh.SSHClientConnection, interfaces: list[str]
@@ -247,7 +329,10 @@ class NxSSHClient:
                 continue
 
             key_parts = key.split(".", 2)
-            if len(key_parts) < 3:
+            if len(key_parts) == 2:
+                _, section = key_parts
+                section_data = sections.setdefault(section, {})
+                section_data["_type"] = value.strip().strip("'\"")
                 continue
 
             _, section, option = key_parts
@@ -255,29 +340,48 @@ class NxSSHClient:
             section_data[option] = value.strip().strip("'\"")
 
         dhcp_ranges: dict[str, dict[str, Any]] = {}
+        dhcp_hosts: dict[str, dict[str, str]] = {}
         for section_data in sections.values():
-            interface = section_data.get("interface")
-            if not interface:
-                continue
+            section_type = section_data.get("_type")
 
-            start = self._as_int(section_data.get("start"))
-            limit = self._as_int(section_data.get("limit"))
-            leasetime = section_data.get("leasetime")
+            if section_type == "dhcp":
+                interface = section_data.get("interface")
+                if not interface:
+                    continue
 
-            range_info: dict[str, Any] = {}
-            if start is not None:
-                range_info["start"] = start
-            if limit is not None:
-                range_info["limit"] = limit
-            if start is not None and limit is not None:
-                range_info["end"] = start + limit - 1
-            if leasetime:
-                range_info["leasetime"] = leasetime
+                start = self._as_int(section_data.get("start"))
+                limit = self._as_int(section_data.get("limit"))
+                leasetime = section_data.get("leasetime")
 
-            if range_info:
-                dhcp_ranges[interface] = range_info
+                range_info: dict[str, Any] = {}
+                if start is not None:
+                    range_info["start"] = start
+                if limit is not None:
+                    range_info["limit"] = limit
+                if start is not None and limit is not None:
+                    range_info["end"] = start + limit - 1
+                if leasetime:
+                    range_info["leasetime"] = leasetime
 
-        return dhcp_ranges
+                if range_info:
+                    dhcp_ranges[interface] = range_info
+
+            if section_type == "host":
+                macs = section_data.get("mac")
+                if not macs:
+                    continue
+
+                for mac in macs.split():
+                    mac_clean = mac.strip().lower()
+                    if not mac_clean:
+                        continue
+
+                    dhcp_hosts[mac_clean] = {
+                        "name": section_data.get("name") or section_data.get("hostname"),
+                        "ip": section_data.get("ip"),
+                    }
+
+        return {"ranges": dhcp_ranges, "hosts": dhcp_hosts}
 
     @staticmethod
     def _as_int(value: str | None) -> int | None:
