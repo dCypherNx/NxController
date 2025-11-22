@@ -185,16 +185,48 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
-        attributes = {
+        ipv4_addresses = device.get("ipv4_addresses", [])
+        ipv6_addresses = device.get("ipv6_addresses", [])
+
+        connections: list[dict[str, Any]] = []
+        seen_connections: set[tuple[tuple[str, Any], ...]] = set()
+        for connection in device.get("connections", []):
+            normalized = tuple(sorted(connection.items()))
+            if normalized in seen_connections:
+                continue
+            seen_connections.add(normalized)
+            connections.append(connection)
+
+        hostname = self._resolve_hostname(device)
+
+        return {
             "interfaces": device.get("interfaces", []),
             "radios": device.get("radios", []),
-            "ipv4_addresses": device.get("ipv4_addresses", []),
-            "ipv6_addresses": device.get("ipv6_addresses", []),
-            "hostname": device.get("name"),
-            "connections": device.get("connections", []),
+            "ipv4_addresses": ipv4_addresses,
+            "ipv6_addresses": ipv6_addresses,
+            "hostname": hostname,
+            "connections": connections,
         }
 
-        return attributes
+    def _resolve_hostname(self, device: dict[str, Any]) -> str | None:
+        host = device.get("host")
+        name = device.get("name")
+        ipv4_addresses = device.get("ipv4_addresses", [])
+        ipv6_addresses = device.get("ipv6_addresses", [])
+
+        if name:
+            return name
+
+        if host:
+            return host
+
+        if ipv4_addresses:
+            return ipv4_addresses[0]
+
+        if ipv6_addresses:
+            return ipv6_addresses[0]
+
+        return None
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
