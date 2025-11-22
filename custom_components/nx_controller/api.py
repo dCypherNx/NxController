@@ -81,19 +81,19 @@ class NxSSHClient:
             identifier = device.ip or device.mac
             primary_mac = endpoint_to_primary_mac.get(identifier, device.mac)
 
-                entry = aggregated_devices.setdefault(
-                    primary_mac,
-                    {
-                        "interfaces": set(),
-                        "radios": set(),
-                        "ipv4_addresses": set(),
-                        "ipv6_addresses": set(),
-                        "state": device.state,
-                        "host": None,
-                        "mac_addresses": [primary_mac],
-                        "name": None,
-                    },
-                )
+            entry = aggregated_devices.setdefault(
+                primary_mac,
+                {
+                    "interfaces": set(),
+                    "radios": set(),
+                    "ipv4_addresses": set(),
+                    "ipv6_addresses": set(),
+                    "state": device.state,
+                    "host": None,
+                    "mac_addresses": [primary_mac],
+                    "name": None,
+                },
+            )
 
             if identifier not in endpoint_to_primary_mac:
                 endpoint_to_primary_mac[identifier] = primary_mac
