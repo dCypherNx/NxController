@@ -60,18 +60,31 @@ class NxSSHClient:
             raise NxSSHError("Unable to communicate with the controller") from err
 
         aggregated_devices: dict[str, dict[str, Any]] = {}
+        endpoint_to_primary_mac: dict[str, str] = {}
 
         for device in devices:
+            identifier = device.ip or device.mac
+            primary_mac = endpoint_to_primary_mac.get(identifier, device.mac)
+
             entry = aggregated_devices.setdefault(
-                device.mac,
+                primary_mac,
                 {
                     "interfaces": set(),
                     "ipv4_addresses": set(),
                     "ipv6_addresses": set(),
                     "state": device.state,
                     "host": None,
+                    "mac_addresses": [primary_mac],
                 },
             )
+
+            if identifier not in endpoint_to_primary_mac:
+                endpoint_to_primary_mac[identifier] = primary_mac
+
+            endpoint_to_primary_mac.setdefault(device.mac, primary_mac)
+
+            if device.mac not in entry["mac_addresses"]:
+                entry["mac_addresses"].append(device.mac)
 
             entry["interfaces"].add(device.interface)
 
@@ -96,6 +109,7 @@ class NxSSHClient:
                 "ipv6_addresses": sorted(value["ipv6_addresses"]),
                 "state": value.get("state"),
                 "host": value.get("host"),
+                "mac_addresses": value.get("mac_addresses", []),
             }
             for mac, value in aggregated_devices.items()
         }
