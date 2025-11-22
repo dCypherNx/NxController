@@ -6,7 +6,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import NxSSHClient, NxSSHError
+from .api import NxSSHClient, NxSSHError, apply_dhcp_fallbacks
 from .const import (
     CONF_IS_DHCP_PROVIDER,
     CONF_SSH_PASSWORD,
@@ -39,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             provider_data = _find_dhcp_data(hass, entry.entry_id)
             if provider_data:
                 data["dhcp"] = provider_data
+                apply_dhcp_fallbacks(data.get("devices", {}), provider_data)
 
         return data
 

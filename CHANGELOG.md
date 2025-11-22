@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0
+- Refatoração do coletor SSH para consolidar dispositivos WiFi e com fio de
+  forma determinística e sem perdas.
+- IDs de sensores agora incluem a entrada configurada, garantindo estabilidade
+  mesmo em ambientes com múltiplos controladores.
+- Pipeline de release revisado para gerar tag e publicar artefato sempre que a
+  versão é atualizada no CI.
+
 ## 0.2.6
 - Dispositivos agora utilizam o primeiro endereço MAC identificado como ID,
   mesmo quando um host name está disponível.

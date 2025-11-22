@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import ipaddress
-from typing import Any
+from typing import Any, Iterable
 
 import asyncssh
 
@@ -30,6 +30,199 @@ class DiscoveredDevice:
             "ip": self.ip,
             "state": self.state,
         }
+
+
+@dataclass
+class AggregatedDevice:
+    """Normalized representation of a controller client."""
+
+    primary_mac: str
+    mac_addresses: set[str] = field(default_factory=set)
+    interfaces: set[str] = field(default_factory=set)
+    radios: set[str] = field(default_factory=set)
+    ipv4_addresses: set[str] = field(default_factory=set)
+    ipv6_addresses: set[str] = field(default_factory=set)
+    host: str | None = None
+    state: str | None = None
+    name: str | None = None
+
+
+class _DeviceAggregator:
+    """Aggregate raw device data and enrich it with DHCP context."""
+
+    def __init__(
+        self, wifi_radios: dict[str, str], dhcp_config: dict[str, Any] | None
+    ) -> None:
+        self._wifi_radios = wifi_radios
+        self._dhcp_hosts: dict[str, dict[str, Any]] = (dhcp_config or {}).get(
+            "hosts", {}
+        ) or {}
+        self._dhcp_names_by_ip: dict[str, str] = {}
+        self._dhcp_ips_by_mac: dict[str, str] = {}
+        for mac, host in self._dhcp_hosts.items():
+            ip = host.get("ip")
+            name = host.get("name")
+            if ip and name:
+                self._dhcp_names_by_ip[ip] = name
+            if ip:
+                self._dhcp_ips_by_mac[mac] = ip
+
+        self._entries: dict[str, AggregatedDevice] = {}
+        self._endpoint_to_primary: dict[str, str] = {}
+
+    def add_device(self, device: DiscoveredDevice) -> None:
+        """Add a device to the aggregation bucket."""
+
+        mac = device.mac.lower()
+        interface = device.interface
+        primary_mac = (
+            self._endpoint_to_primary.get(mac)
+            or (device.ip and self._endpoint_to_primary.get(device.ip))
+            or mac
+        )
+
+        self._endpoint_to_primary.setdefault(mac, primary_mac)
+        if device.ip:
+            self._endpoint_to_primary.setdefault(device.ip, primary_mac)
+
+        entry = self._entries.setdefault(
+            primary_mac, AggregatedDevice(primary_mac=primary_mac)
+        )
+        entry.mac_addresses.add(mac)
+        entry.interfaces.add(interface)
+
+        radio = self._wifi_radios.get(interface)
+        if radio:
+            entry.radios.add(radio)
+
+        if device.state:
+            entry.state = device.state
+
+        self._attach_ip(entry, device.ip)
+
+    def _attach_ip(self, entry: AggregatedDevice, ip_value: str | None) -> None:
+        """Attach an IP address or hostname to the aggregated entry."""
+
+        if not ip_value:
+            return
+
+        try:
+            ip_obj = ipaddress.ip_address(ip_value)
+        except ValueError:
+            entry.host = ip_value
+            return
+
+        if ip_obj.version == 4:
+            entry.ipv4_addresses.add(ip_value)
+        else:
+            entry.ipv6_addresses.add(ip_value)
+
+    def _apply_dhcp_context(self) -> None:
+        """Enrich missing information using DHCP reservations."""
+
+        for entry in self._entries.values():
+            if not entry.ipv4_addresses and not entry.ipv6_addresses:
+                for mac in entry.mac_addresses:
+                    dhcp_ip = self._dhcp_ips_by_mac.get(mac)
+                    if dhcp_ip:
+                        self._attach_ip(entry, dhcp_ip)
+
+            dhcp_name = self._dhcp_name_for(entry.mac_addresses, entry.ipv4_addresses)
+            if dhcp_name:
+                entry.name = dhcp_name
+
+    def _dhcp_name_for(
+        self, macs: Iterable[str], ipv4_addresses: Iterable[str]
+    ) -> str | None:
+        """Return the DHCP name based on MAC or IPv4 assignment."""
+
+        for mac in macs:
+            host = self._dhcp_hosts.get(mac)
+            if host and host.get("name"):
+                return host["name"]
+
+        for ip_value in ipv4_addresses:
+            name = self._dhcp_names_by_ip.get(ip_value)
+            if name:
+                return name
+
+        return None
+
+    def as_payload(self) -> dict[str, Any]:
+        """Return a deterministic representation suitable for the coordinator."""
+
+        self._apply_dhcp_context()
+
+        payload: dict[str, Any] = {}
+        for primary_mac, entry in self._entries.items():
+            mac_list = [primary_mac] + [
+                mac for mac in sorted(entry.mac_addresses) if mac != primary_mac
+            ]
+            payload[primary_mac] = {
+                "primary_mac": primary_mac,
+                "interfaces": sorted(entry.interfaces),
+                "radios": sorted(entry.radios),
+                "ipv4_addresses": sorted(entry.ipv4_addresses),
+                "ipv6_addresses": sorted(entry.ipv6_addresses),
+                "state": entry.state,
+                "host": entry.host,
+                "mac_addresses": mac_list,
+                "name": entry.name,
+            }
+
+        return payload
+
+
+def apply_dhcp_fallbacks(
+    devices: dict[str, Any], dhcp_data: dict[str, Any] | None
+) -> None:
+    """Populate missing IPs and names using DHCP provider data."""
+
+    if not dhcp_data:
+        return
+
+    dhcp_hosts: dict[str, dict[str, Any]] = dhcp_data.get("hosts") or {}
+    dhcp_ip_by_mac: dict[str, str] = {
+        mac: host["ip"]
+        for mac, host in dhcp_hosts.items()
+        if host.get("ip")
+    }
+    dhcp_name_by_ip: dict[str, str] = {
+        host["ip"]: host["name"]
+        for host in dhcp_hosts.values()
+        if host.get("ip") and host.get("name")
+    }
+
+    for device in devices.values():
+        mac_addresses = [mac.lower() for mac in device.get("mac_addresses", [])]
+        ipv4_addresses = set(device.get("ipv4_addresses") or [])
+
+        if not ipv4_addresses:
+            for mac in mac_addresses:
+                dhcp_ip = dhcp_ip_by_mac.get(mac)
+                if dhcp_ip:
+                    ipv4_addresses.add(dhcp_ip)
+
+            if ipv4_addresses:
+                device["ipv4_addresses"] = sorted(ipv4_addresses)
+
+        if device.get("name"):
+            continue
+
+        for mac in mac_addresses:
+            host_info = dhcp_hosts.get(mac)
+            if host_info and host_info.get("name"):
+                device["name"] = host_info["name"]
+                break
+
+        if device.get("name"):
+            continue
+
+        for ip in device.get("ipv4_addresses", []):
+            dhcp_name = dhcp_name_by_ip.get(ip)
+            if dhcp_name:
+                device["name"] = dhcp_name
+                break
 
 
 class NxSSHClient:
@@ -60,118 +253,13 @@ class NxSSHClient:
         except (asyncssh.Error, OSError) as err:
             raise NxSSHError("Unable to communicate with the controller") from err
 
-        aggregated_devices: dict[str, dict[str, Any]] = {}
-        endpoint_to_primary_mac: dict[str, str] = {}
-
-        dhcp_hosts: dict[str, dict[str, Any]] = {}
-        dhcp_names_by_ip: dict[str, str] = {}
-        dhcp_ips_by_mac: dict[str, str] = {}
-
-        if dhcp_config:
-            dhcp_hosts = dhcp_config.get("hosts", {}) or {}
-            for mac, host in dhcp_hosts.items():
-                ip = host.get("ip")
-                name = host.get("name")
-                if ip and name:
-                    dhcp_names_by_ip[ip] = name
-                if ip:
-                    dhcp_ips_by_mac[mac] = ip
-
+        aggregator = _DeviceAggregator(wifi_radios, dhcp_config)
         for device in devices:
-            primary_mac = (
-                endpoint_to_primary_mac.get(device.mac)
-                or (device.ip and endpoint_to_primary_mac.get(device.ip))
-                or device.mac
-            )
-
-            entry = aggregated_devices.setdefault(
-                primary_mac,
-                {
-                    "interfaces": set(),
-                    "radios": set(),
-                    "ipv4_addresses": set(),
-                    "ipv6_addresses": set(),
-                    "state": device.state,
-                    "host": None,
-                    "mac_addresses": [primary_mac],
-                    "name": None,
-                },
-            )
-
-            endpoint_to_primary_mac.setdefault(device.mac, primary_mac)
-            if device.ip:
-                endpoint_to_primary_mac.setdefault(device.ip, primary_mac)
-
-            if device.mac not in entry["mac_addresses"]:
-                entry["mac_addresses"].append(device.mac)
-
-            entry["interfaces"].add(device.interface)
-
-            radio = wifi_radios.get(device.interface)
-            if radio:
-                entry["radios"].add(radio)
-
-            if device.ip:
-                try:
-                    ip_obj = ipaddress.ip_address(device.ip)
-                except ValueError:
-                    entry["host"] = device.ip
-                else:
-                    if ip_obj.version == 4:
-                        entry["ipv4_addresses"].add(device.ip)
-                    else:
-                        entry["ipv6_addresses"].add(device.ip)
-            else:
-                for mac in entry["mac_addresses"]:
-                    dhcp_ip = dhcp_ips_by_mac.get(mac)
-                    if not dhcp_ip:
-                        continue
-                    try:
-                        ip_obj = ipaddress.ip_address(dhcp_ip)
-                    except ValueError:
-                        continue
-                    if ip_obj.version == 4:
-                        entry["ipv4_addresses"].add(dhcp_ip)
-                    else:
-                        entry["ipv6_addresses"].add(dhcp_ip)
-
-            if device.state:
-                entry["state"] = device.state
-
-            dhcp_name: str | None = None
-            if dhcp_hosts:
-                for mac in entry["mac_addresses"]:
-                    host = dhcp_hosts.get(mac)
-                    if host and host.get("name"):
-                        dhcp_name = host["name"]
-                        break
-
-            if not dhcp_name and dhcp_names_by_ip:
-                for ipv4 in entry["ipv4_addresses"]:
-                    if ipv4 in dhcp_names_by_ip:
-                        dhcp_name = dhcp_names_by_ip[ipv4]
-                        break
-
-            if dhcp_name:
-                entry["name"] = dhcp_name
-
-        devices_payload = {
-            mac: {
-                "interfaces": sorted(value["interfaces"]),
-                "radios": sorted(value["radios"]),
-                "ipv4_addresses": sorted(value["ipv4_addresses"]),
-                "ipv6_addresses": sorted(value["ipv6_addresses"]),
-                "state": value.get("state"),
-                "host": value.get("host"),
-                "mac_addresses": value.get("mac_addresses", []),
-                "name": value.get("name"),
-            }
-            for mac, value in aggregated_devices.items()
-        }
+            aggregator.add_device(device)
 
         payload = {
             "interfaces": interfaces,
-            "devices": devices_payload,
+            "devices": aggregator.as_payload(),
         }
 
         if dhcp_config is not None:
@@ -338,12 +426,12 @@ class NxSSHClient:
             if len(key_parts) == 2:
                 _, section = key_parts
                 section_data = sections.setdefault(section, {})
-                section_data["_type"] = value.strip().strip("'\"")
+                section_data["_type"] = value.strip().strip('"')
                 continue
 
             _, section, option = key_parts
             section_data = sections.setdefault(section, {})
-            section_data[option] = value.strip().strip("'\"")
+            section_data[option] = value.strip().strip('"')
 
         dhcp_ranges: dict[str, dict[str, Any]] = {}
         dhcp_hosts: dict[str, dict[str, str]] = {}
