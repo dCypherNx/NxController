@@ -122,13 +122,19 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         device = self.coordinator.data.get("devices", {}).get(self._mac, {})
-        return {
+        attributes = {
             "interfaces": device.get("interfaces", []),
             "ipv4_addresses": device.get("ipv4_addresses", []),
             "ipv6_addresses": device.get("ipv6_addresses", []),
             "host": device.get("host"),
             "mac_address": self._mac,
+            "mac_addresses": device.get("mac_addresses", [self._mac]),
         }
+
+        for idx, mac in enumerate(attributes["mac_addresses"]):
+            attributes[f"MAC{idx}"] = mac
+
+        return attributes
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
