@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import ipaddress
 from typing import Any
 
 import asyncssh
@@ -51,9 +52,50 @@ class NxSSHClient:
         except (asyncssh.Error, OSError) as err:
             raise NxSSHError("Unable to communicate with the controller") from err
 
+        aggregated_devices: dict[str, dict[str, Any]] = {}
+
+        for device in devices:
+            entry = aggregated_devices.setdefault(
+                device.mac,
+                {
+                    "interfaces": set(),
+                    "ipv4_addresses": set(),
+                    "ipv6_addresses": set(),
+                    "state": device.state,
+                    "host": None,
+                },
+            )
+
+            entry["interfaces"].add(device.interface)
+
+            if device.ip:
+                try:
+                    ip_obj = ipaddress.ip_address(device.ip)
+                except ValueError:
+                    entry["host"] = device.ip
+                else:
+                    if ip_obj.version == 4:
+                        entry["ipv4_addresses"].add(device.ip)
+                    else:
+                        entry["ipv6_addresses"].add(device.ip)
+
+            if device.state:
+                entry["state"] = device.state
+
+        devices_payload = {
+            mac: {
+                "interfaces": sorted(value["interfaces"]),
+                "ipv4_addresses": sorted(value["ipv4_addresses"]),
+                "ipv6_addresses": sorted(value["ipv6_addresses"]),
+                "state": value.get("state"),
+                "host": value.get("host"),
+            }
+            for mac, value in aggregated_devices.items()
+        }
+
         return {
             "interfaces": interfaces,
-            "devices": {device.mac: device.as_dict for device in devices},
+            "devices": devices_payload,
         }
 
     async def _list_interfaces(self, conn: asyncssh.SSHClientConnection) -> list[str]:

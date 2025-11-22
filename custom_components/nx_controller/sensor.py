@@ -93,9 +93,26 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._mac = mac
-        self._attr_unique_id = f"{entry.entry_id}_{mac}"
-        self._attr_name = mac
+        self._attr_unique_id = mac
         self._attr_device_info = _device_info(entry)
+
+    @property
+    def name(self) -> str:
+        device = self.coordinator.data.get("devices", {}).get(self._mac, {})
+        host = device.get("host")
+        ipv4_addresses = device.get("ipv4_addresses") or []
+        ipv6_addresses = device.get("ipv6_addresses") or []
+
+        if host:
+            return host
+
+        if ipv4_addresses:
+            return ipv4_addresses[0]
+
+        if ipv6_addresses:
+            return ipv6_addresses[0]
+
+        return self._mac
 
     @property
     def native_value(self):
@@ -106,8 +123,10 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         device = self.coordinator.data.get("devices", {}).get(self._mac, {})
         return {
-            "interface": device.get("interface"),
-            "ip_address": device.get("ip"),
+            "interfaces": device.get("interfaces", []),
+            "ipv4_addresses": device.get("ipv4_addresses", []),
+            "ipv6_addresses": device.get("ipv6_addresses", []),
+            "host": device.get("host"),
             "mac_address": self._mac,
         }
 
