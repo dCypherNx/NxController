@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.2
+- Incremento de versão para a release 0.2.2.
+
 ## 0.2.1
 - Incremento de versão para a release 0.2.1.
 
