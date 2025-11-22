@@ -18,9 +18,35 @@ jobs:
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Ensure repository metadata
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const description = "Home Assistant integration for Nx Controller";
+            const homepage = `https://github.com/${owner}/${repo}`;
+            await github.rest.repos.update({
+              owner,
+              repo,
+              name: repo,
+              description,
+              homepage,
+              has_issues: true,
+            });
+
+            const topics = [
+              "home-assistant",
+              "hacs",
+              "integration",
+              "nx-controller",
+            ];
+            await github.rest.repos.replaceAllTopics({ owner, repo, names: topics });
       - name: Run HACS validation
         uses: hacs/action@main
         with:
