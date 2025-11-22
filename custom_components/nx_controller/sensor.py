@@ -5,7 +5,6 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityAvailability
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -23,22 +22,6 @@ def _device_info(entry: ConfigEntry) -> dict[str, Any]:
         "model": "POC",
         "name": entry.title,
     }
-
-
-
-def _availability_from_coordinator(
-    coordinator: DataUpdateCoordinator,
-) -> EntityAvailability:
-    """Return availability details based on the coordinator status."""
-
-    if coordinator.last_update_success:
-        return EntityAvailability(available=True)
-
-    description = None
-    if coordinator.last_exception:
-        description = str(coordinator.last_exception)
-
-    return EntityAvailability(available=False, description=description)
 
 
 async def async_setup_entry(
@@ -93,10 +76,6 @@ class NxControllerRouterSensor(SensorEntity):
     def available(self) -> bool:
         return self._coordinator.last_update_success
 
-    @property
-    def availability(self) -> EntityAvailability:
-        return _availability_from_coordinator(self._coordinator)
-
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
             self._entry.add_update_listener(self._async_handle_update)
@@ -128,10 +107,6 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         self._mac = mac
         self._attr_unique_id = mac
         self._attr_device_info = _device_info(entry)
-
-    @property
-    def availability(self) -> EntityAvailability:
-        return _availability_from_coordinator(self.coordinator)
 
     @property
     def name(self) -> str:
