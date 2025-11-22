@@ -131,6 +131,23 @@ class _DeviceAggregator:
             if dhcp_name:
                 entry.name = dhcp_name
 
+    def _resolved_host(self, entry: AggregatedDevice) -> str | None:
+        """Return a consolidated host value, preferring the best identifier."""
+
+        if entry.name:
+            return entry.name
+
+        if entry.host:
+            return entry.host
+
+        if entry.ipv4_addresses:
+            return sorted(entry.ipv4_addresses)[0]
+
+        if entry.ipv6_addresses:
+            return sorted(entry.ipv6_addresses)[0]
+
+        return None
+
     def _dhcp_name_for(
         self, macs: Iterable[str], ipv4_addresses: Iterable[str]
     ) -> str | None:
@@ -158,6 +175,7 @@ class _DeviceAggregator:
             mac_list = [primary_mac] + [
                 mac for mac in sorted(entry.mac_addresses) if mac != primary_mac
             ]
+            host_value = self._resolved_host(entry)
             payload[primary_mac] = {
                 "primary_mac": primary_mac,
                 "interfaces": sorted(entry.interfaces),
@@ -165,7 +183,7 @@ class _DeviceAggregator:
                 "ipv4_addresses": sorted(entry.ipv4_addresses),
                 "ipv6_addresses": sorted(entry.ipv6_addresses),
                 "state": entry.state,
-                "host": entry.host,
+                "host": host_value,
                 "mac_addresses": mac_list,
                 "name": entry.name,
             }
@@ -213,6 +231,8 @@ def apply_dhcp_fallbacks(
             host_info = dhcp_hosts.get(mac)
             if host_info and host_info.get("name"):
                 device["name"] = host_info["name"]
+                if not device.get("host"):
+                    device["host"] = device["name"]
                 break
 
         if device.get("name"):
@@ -222,6 +242,8 @@ def apply_dhcp_fallbacks(
             dhcp_name = dhcp_name_by_ip.get(ip)
             if dhcp_name:
                 device["name"] = dhcp_name
+                if not device.get("host"):
+                    device["host"] = dhcp_name
                 break
 
 
