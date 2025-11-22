@@ -1,15 +1,42 @@
 name: Release assets
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   build-and-upload:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Read version from manifest
+        id: manifest
+        run: |
+          version=$(python3 - <<'PY'
+import json
+with open("custom_components/nx_controller/manifest.json") as f:
+    print(json.load(f)["version"])
+PY
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Create integration archive
         run: |
@@ -17,9 +44,16 @@ jobs:
           cd custom_components
           zip -r ../dist/nx_controller.zip nx_controller
 
-      - name: Upload release asset
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.manifest.outputs.version }}
+          name: v${{ steps.manifest.outputs.version }}
           files: dist/nx_controller.zip
+          generate_release_notes: true
+          make_latest: true
+          draft: false
+          prerelease: false
+          allow_updates: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
