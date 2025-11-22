@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.7
+- Incremento de versão para a release 0.2.7.
+
 ## 0.2.6
 - Dispositivos agora utilizam o primeiro endereço MAC identificado como ID,
   mesmo quando um host name está disponível.
