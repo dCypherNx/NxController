@@ -45,6 +45,7 @@ class AggregatedDevice:
     host: str | None = None
     state: str | None = None
     name: str | None = None
+    connections: list[dict[str, Any]] = field(default_factory=list)
 
 
 class _DeviceAggregator:
@@ -94,6 +95,17 @@ class _DeviceAggregator:
         radio = self._wifi_radios.get(interface)
         if radio:
             entry.radios.add(radio)
+
+        connection_details: dict[str, Any] = {
+            "interface": interface,
+            "ip": device.ip,
+            "state": device.state,
+        }
+
+        if radio:
+            connection_details["radio"] = radio
+
+        entry.connections.append(connection_details)
 
         if device.state:
             entry.state = device.state
@@ -175,6 +187,13 @@ class _DeviceAggregator:
             mac_list = [primary_mac] + [
                 mac for mac in sorted(entry.mac_addresses) if mac != primary_mac
             ]
+            connections = sorted(
+                entry.connections,
+                key=lambda conn: (
+                    conn.get("interface") or "",
+                    conn.get("ip") or "",
+                ),
+            )
             host_value = self._resolved_host(entry)
             payload[primary_mac] = {
                 "primary_mac": primary_mac,
@@ -186,6 +205,7 @@ class _DeviceAggregator:
                 "host": host_value,
                 "mac_addresses": mac_list,
                 "name": entry.name,
+                "connections": connections,
             }
 
         return payload

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+- Incremento de versão para a release 0.2.3 com melhorias nos atributos de
+  conexão e retirada de campos de host e MAC conforme solicitado.
+
 ## 0.2.2
 - Incremento de versão para a release 0.2.2.
 
@@ -33,9 +37,6 @@
 - Normalização dos nomes de interfaces retornados pelo controlador para
   evitar sufixos como `@ifX` e permitir que rádios WiFi sejam vinculados
   corretamente.
-
-## 0.2.3
-- Incremento de versão para a release 0.2.3.
 
 ## 0.2.0
 - Incremento de versão para a release 0.2.0.

@@ -191,13 +191,8 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
             "ipv4_addresses": device.get("ipv4_addresses", []),
             "ipv6_addresses": device.get("ipv6_addresses", []),
             "hostname": device.get("name"),
-            "host": device.get("host"),
-            "mac_address": self._primary_mac,
-            "mac_addresses": device.get("mac_addresses", [self._primary_mac]),
+            "connections": device.get("connections", []),
         }
-
-        for idx, mac in enumerate(attributes["mac_addresses"]):
-            attributes[f"MAC{idx}"] = mac
 
         return attributes
 
