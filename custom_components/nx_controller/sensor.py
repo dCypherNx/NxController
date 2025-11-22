@@ -120,10 +120,11 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._device_key = device_key
         mac_addresses = device_data.get("mac_addresses") or []
-        self._primary_mac = device_data.get("primary_mac") or (
-            mac_addresses[0] if mac_addresses else device_key
+        primary_mac = device_data.get("primary_mac") or (
+            mac_addresses[0] if mac_addresses else None
         )
-        self._attr_unique_id = f"{entry.entry_id}_{self._primary_mac}"
+        self._primary_mac = (primary_mac or "").lower()
+        self._attr_unique_id = self._primary_mac
         self._attr_device_info = _device_info(entry)
 
     @property
