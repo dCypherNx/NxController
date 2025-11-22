@@ -78,8 +78,11 @@ class NxSSHClient:
                     dhcp_ips_by_mac[mac] = ip
 
         for device in devices:
-            identifier = device.ip or device.mac
-            primary_mac = endpoint_to_primary_mac.get(identifier, device.mac)
+            primary_mac = (
+                endpoint_to_primary_mac.get(device.mac)
+                or (device.ip and endpoint_to_primary_mac.get(device.ip))
+                or device.mac
+            )
 
             entry = aggregated_devices.setdefault(
                 primary_mac,
@@ -95,10 +98,9 @@ class NxSSHClient:
                 },
             )
 
-            if identifier not in endpoint_to_primary_mac:
-                endpoint_to_primary_mac[identifier] = primary_mac
-
             endpoint_to_primary_mac.setdefault(device.mac, primary_mac)
+            if device.ip:
+                endpoint_to_primary_mac.setdefault(device.ip, primary_mac)
 
             if device.mac not in entry["mac_addresses"]:
                 entry["mac_addresses"].append(device.mac)
@@ -185,6 +187,7 @@ class NxSSHClient:
             raise NxSSHError("Failed to obtain interfaces")
 
         interfaces: list[str] = []
+        seen_interfaces: set[str] = set()
         for line in result.stdout.splitlines():
             # Expected output: '1: lo: <...>'
             if ":" not in line:
@@ -193,8 +196,11 @@ class NxSSHClient:
             if len(parts) < 2:
                 continue
             name = parts[1].strip()
-            if name and name != "lo":
+            if "@" in name:
+                name = name.split("@", 1)[0].strip()
+            if name and name != "lo" and name not in seen_interfaces:
                 interfaces.append(name)
+                seen_interfaces.add(name)
         if not interfaces:
             raise NxSSHError("No interfaces discovered")
         return interfaces
