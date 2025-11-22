@@ -23,19 +23,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
       - name: Read version from manifest
         id: manifest
         run: |
-          version=$(python3 - <<'PY'
-import json
-with open("custom_components/nx_controller/manifest.json") as f:
-    print(json.load(f)["version"])
-PY
+          version=$(jq -r '.version' custom_components/nx_controller/manifest.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Create integration archive
