@@ -59,9 +59,7 @@ class NxControllerSensor(CoordinatorEntity[NxControllerCoordinator], SensorEntit
 
     @property
     def name(self) -> str:
-        client = self._client
-        friendly = client.hostname or client.primary_mac
-        return friendly
+        return f"{self._alias}_{self._primary_mac.replace(':', '_')}"
 
     @property
     def available(self) -> bool:
