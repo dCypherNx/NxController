@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+- Corrige a identificação das entidades para usar sempre o MAC normalizado, sem
+  recorrer ao hostname, e restaura os atributos de MAC e hostname.
+
 ## 0.3.0
 - Implementa mapeamento persistente de identidades para consolidar dispositivos
   com MAC aleatório em sensores únicos e expõe a lista de MACs pendentes para
