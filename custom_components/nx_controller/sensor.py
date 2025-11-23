@@ -69,6 +69,13 @@ class NxControllerSensor(CoordinatorEntity[NxControllerCoordinator], SensorEntit
         return "online" if self._client.online else "offline"
 
     @property
+    def name(self) -> str | None:
+        hostname = (self._client.hostname or "").strip()
+        if hostname and hostname.lower() not in {"desconhecido", "unknown"}:
+            return hostname
+        return self.entity_id
+
+    @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         client = self._client
         return {
@@ -103,9 +110,4 @@ class NxControllerSensor(CoordinatorEntity[NxControllerCoordinator], SensorEntit
 
         if entry is not None and entry.name:
             return
-
-        hostname = (self._client.hostname or "").strip()
-        if hostname and hostname.lower() not in {"desconhecido", "unknown"}:
-            self._attr_name = hostname
-        else:
-            self._attr_name = self._primary_mac.upper()
+        self._attr_name = self.name

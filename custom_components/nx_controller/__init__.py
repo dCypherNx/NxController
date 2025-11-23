@@ -70,17 +70,34 @@ class DeviceRegistry:
     async def async_save(self) -> None:
         await self._store.async_save({"version": STORAGE_VERSION, "devices": self.devices})
 
-    def get_primary_for_mac(self, mac: str) -> Optional[str]:
+    def _normalize_hostname(self, hostname: Optional[str]) -> Optional[str]:
+        if not hostname:
+            return None
+        normalized = hostname.strip()
+        return normalized.lower() or None
+
+    def get_primary_for_mac(self, alias: str, mac: str) -> Optional[str]:
         for primary, info in self.devices.items():
+            if info.get("alias") != alias:
+                continue
             if mac in info.get("macs", []):
                 return primary
         return None
 
-    def ensure_device(self, alias: str, mac: str) -> str:
-        existing = self.get_primary_for_mac(mac)
+    def _update_metadata(self, info: Dict[str, object], hostname: Optional[str], ipv4: Optional[str]) -> None:
+        metadata: Dict[str, object] = info.setdefault("metadata", {})  # type: ignore[arg-type]
+        normalized_hostname = self._normalize_hostname(hostname)
+        if normalized_hostname:
+            metadata["hostname"] = normalized_hostname
+        if ipv4:
+            metadata["ipv4"] = ipv4
+
+    def ensure_device(self, alias: str, mac: str, hostname: Optional[str], ipv4: Optional[str]) -> str:
+        existing = self.get_primary_for_mac(alias, mac)
         if existing:
             return existing
         self.devices[mac] = {"alias": alias, "macs": [mac], "metadata": {}}
+        self._update_metadata(self.devices[mac], hostname, ipv4)
         return mac
 
     def add_mac(self, alias: str, primary_mac: str, alt_mac: str) -> None:
@@ -89,14 +106,67 @@ class DeviceRegistry:
             raise ValueError("Primary MAC not found")
         if primary.get("alias") != alias:
             raise ValueError("Alias mismatch for primary device")
-        alt_primary = self.get_primary_for_mac(alt_mac)
+        alt_primary = self.get_primary_for_mac(alias, alt_mac)
         if alt_primary and alt_primary != primary_mac:
             alt_info = self.devices.pop(alt_primary)
             for mac in alt_info.get("macs", []):
                 if mac not in primary["macs"]:
                     primary["macs"].append(mac)
+            self._update_metadata(
+                primary,
+                alt_info.get("metadata", {}).get("hostname"),
+                alt_info.get("metadata", {}).get("ipv4"),
+            )
         if alt_mac not in primary["macs"]:
             primary["macs"].append(alt_mac)
+
+    def find_by_identity(self, alias: str, hostname: Optional[str], ipv4: Optional[str]) -> Optional[str]:
+        """Find primary device matching hostname and IPv4 rules."""
+
+        if not hostname and not ipv4:
+            return None
+
+        target_hostname = self._normalize_hostname(hostname)
+
+        for primary, info in self.devices.items():
+            if info.get("alias") != alias:
+                continue
+            metadata: Dict[str, object] = info.get("metadata", {})  # type: ignore[arg-type]
+            stored_hostname = self._normalize_hostname(metadata.get("hostname"))
+            stored_ipv4 = metadata.get("ipv4")
+
+            if target_hostname:
+                if stored_hostname and stored_hostname != target_hostname:
+                    continue
+                if ipv4:
+                    if stored_ipv4 and stored_ipv4 != ipv4:
+                        continue
+                    return primary
+            if not target_hostname and ipv4:
+                if stored_hostname:
+                    continue
+                if stored_ipv4 == ipv4:
+                    return primary
+        return None
+
+    def map_mac(
+        self, alias: str, mac: str, hostname: Optional[str], ipv4: Optional[str]
+    ) -> tuple[str, bool]:
+        """Map a MAC to a primary device using hostname/IP association rules."""
+
+        existing_primary = self.get_primary_for_mac(alias, mac)
+        if existing_primary:
+            self._update_metadata(self.devices[existing_primary], hostname, ipv4)
+            return existing_primary, False
+
+        identity_primary = self.find_by_identity(alias, hostname, ipv4)
+        if identity_primary:
+            self.add_mac(alias, identity_primary, mac)
+            self._update_metadata(self.devices[identity_primary], hostname, ipv4)
+            return identity_primary, True
+
+        primary = self.ensure_device(alias, mac, hostname, ipv4)
+        return primary, True
 
 
 class NxControllerCoordinator(DataUpdateCoordinator[Dict[str, NxClient]]):
@@ -141,11 +211,12 @@ class NxControllerCoordinator(DataUpdateCoordinator[Dict[str, NxClient]]):
             normalized_mac = normalize_mac(mac)
             if not normalized_mac:
                 return
-            primary = self.registry.get_primary_for_mac(normalized_mac)
-            is_new = False
-            if not primary:
-                primary = self.registry.ensure_device(self.alias, normalized_mac)
-                is_new = True
+
+            hostname: Optional[str] = (data.get("hostname") or "").strip() or None
+            ipv4: Optional[str] = data.get("ipv4") or data.get("ip")
+
+            primary, is_new = self.registry.map_mac(self.alias, normalized_mac, hostname, ipv4)
+
             client = clients.get(primary)
             if not client:
                 if previous := previous_clients.get(primary):
@@ -155,10 +226,8 @@ class NxControllerCoordinator(DataUpdateCoordinator[Dict[str, NxClient]]):
                     client = NxClient(primary_mac=primary, alias=self.alias, macs=set())
                 clients[primary] = client
             client.macs.add(normalized_mac)
-            hostname = data.get("hostname") or client.hostname
             if hostname:
                 client.hostname = hostname
-            ipv4 = data.get("ipv4") or data.get("ip")
             if ipv4:
                 client.ipv4 = ipv4
             ipv6 = data.get("ipv6")

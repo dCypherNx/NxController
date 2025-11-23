@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6
+- Restringe associações de MAC ao alias do roteador configurado, evitando
+  compartilhamento acidental entre múltiplos controladores.
+- Normaliza hostnames armazenados e mantém o mapeamento de MACs coerente com o
+  alias ao consolidar dispositivos com MAC aleatório.
+
 ## 0.1.5
 - Corrige a geração de `entity_id` para usar sempre o alias e o MAC normalizado,
   independentemente do hostname.
