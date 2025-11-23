@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0
+- Garante que todos os sensores de dispositivos usem o MAC normalizado como nome
+  e identificador sugerido, evitando entidades baseadas em hostname.
+- Refatoração do coletor SSH para consolidar dispositivos WiFi e com fio de
+  forma determinística e sem perdas.
+- IDs de sensores agora incluem a entrada configurada, garantindo estabilidade
+  mesmo em ambientes com múltiplos controladores.
+- Pipeline de release revisado para gerar tag e publicar artefato sempre que a
+  versão é atualizada no CI.
+
 ## 0.3.3
 - Corrige a identificação das entidades para usar sempre o MAC normalizado, sem
   recorrer ao hostname, e restaura os atributos de MAC e hostname.
@@ -57,11 +67,3 @@
 - IDs de sensores agora utilizam invariavelmente o endereço MAC reportado pelo
   controlador como identificador único.
 - Incremento de versão para a release 0.1.1.
-
-## 0.1.0
-- Refatoração do coletor SSH para consolidar dispositivos WiFi e com fio de
-  forma determinística e sem perdas.
-- IDs de sensores agora incluem a entrada configurada, garantindo estabilidade
-  mesmo em ambientes com múltiplos controladores.
-- Pipeline de release revisado para gerar tag e publicar artefato sempre que a
-  versão é atualizada no CI.
