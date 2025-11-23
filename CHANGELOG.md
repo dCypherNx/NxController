@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.8
+- Corrige a configuração do HACS para usar o conteúdo do repositório em vez de
+  um artefato ZIP, garantindo que a integração apareça corretamente no Home
+  Assistant após a instalação.
+
 ## 0.2.7
 - Incremento de versão para a release 0.2.7.
 

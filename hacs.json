@@ -2,6 +2,5 @@
   "name": "Nx Controller",
   "content_in_root": false,
   "render_readme": true,
-  "zip_release": true,
-  "filename": "nx_controller.zip"
+  "zip_release": false
 }
