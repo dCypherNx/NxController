@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -14,6 +15,19 @@ from homeassistant.config_entries import ConfigEntry
 
 from .api import _normalize_mac, _resolve_hostname
 from .const import DOMAIN
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _mac_parts(mac: str | None) -> tuple[str | None, str | None]:
+    """Return normalized MAC and mac_id (lowercase, no colons)."""
+
+    normalized = _normalize_mac(mac)
+    if not normalized:
+        return None, None
+
+    return normalized, normalized.replace(":", "").lower()
 
 
 def _device_info(entry: ConfigEntry) -> dict[str, Any]:
@@ -35,30 +49,31 @@ async def async_setup_entry(
     coordinator = data["coordinator"]
 
     router_sensor = NxControllerRouterSensor(entry, host, coordinator)
-    device_entities = [
-        NxControllerDeviceSensor(
-            entry, coordinator, mac, coordinator.data.get("devices", {}).get(mac, {})
-        )
-        for mac in coordinator.data.get("devices", {})
-    ]
+    device_entities: list[NxControllerDeviceSensor] = []
+    known_device_keys: set[str] = set()
 
-    known_macs = set(mac for mac in coordinator.data.get("devices", {}))
+    for device_key, device_data in (coordinator.data.get("devices") or {}).items():
+        sensor = _build_device_sensor(entry, coordinator, device_key, device_data)
+        if sensor:
+            device_entities.append(sensor)
+            known_device_keys.add(device_key)
 
     async def _async_handle_coordinator_update() -> None:
         new_devices = coordinator.data.get("devices", {})
-        new_macs = set(new_devices) - known_macs
-        if new_macs:
-            entities = [
-                NxControllerDeviceSensor(
-                    entry,
-                    coordinator,
-                    mac,
-                    new_devices.get(mac, {}),
+        new_device_keys = set(new_devices) - known_device_keys
+        if new_device_keys:
+            entities: list[NxControllerDeviceSensor] = []
+
+            for device_key in new_device_keys:
+                sensor = _build_device_sensor(
+                    entry, coordinator, device_key, new_devices.get(device_key, {})
                 )
-                for mac in new_macs
-            ]
-            known_macs.update(new_macs)
-            async_add_entities(entities)
+                if sensor:
+                    known_device_keys.add(device_key)
+                    entities.append(sensor)
+
+            if entities:
+                async_add_entities(entities)
 
     coordinator.async_add_listener(_async_handle_coordinator_update)
 
@@ -125,20 +140,18 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._device_key = device_key
-        mac_addresses = device_data.get("mac_addresses") or []
-        primary_mac = device_data.get("primary_mac") or (
-            mac_addresses[0] if mac_addresses else None
+        normalized_mac, mac_id, primary_mac = self._extract_mac_identifiers(
+            device_key, device_data
         )
-        normalized_primary = _normalize_mac(primary_mac)
-        normalized_fallback = _normalize_mac(mac_addresses[0]) if mac_addresses else None
-        normalized_device_key = _normalize_mac(device_key)
-        self._primary_mac = (
-            normalized_primary
-            or normalized_fallback
-            or normalized_device_key
-            or (primary_mac or device_key)
-        )
-        self._attr_unique_id = self._primary_mac
+
+        if not normalized_mac or not mac_id:
+            raise ValueError(f"Device {device_key} is missing a valid MAC address")
+
+        self._normalized_mac = normalized_mac
+        self._mac_id = mac_id
+        self._primary_mac = primary_mac or self._normalized_mac
+        self._attr_unique_id = f"er605_{self._mac_id}"
+        self._attr_suggested_object_id = self._attr_unique_id
         self._attr_device_info = _device_info(entry)
 
     @property
@@ -217,16 +230,6 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         ipv4_addresses = device.get("ipv4_addresses", [])
         ipv6_addresses = device.get("ipv6_addresses", [])
         hostname_sources = self.coordinator.data.get("hostname_sources") or {}
-
-        connections: list[dict[str, Any]] = []
-        seen_connections: set[tuple[tuple[str, Any], ...]] = set()
-        for connection in device.get("connections", []):
-            normalized = tuple(sorted(connection.items()))
-            if normalized in seen_connections:
-                continue
-            seen_connections.add(normalized)
-            connections.append(connection)
-
         hostname = None
         mac_candidates = device.get("mac_addresses") or [self._primary_mac]
         for mac in mac_candidates:
@@ -245,8 +248,8 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
             "radios": device.get("radios", []),
             "ipv4_addresses": ipv4_addresses,
             "ipv6_addresses": ipv6_addresses,
+            "mac": self._normalized_mac,
             "hostname": hostname,
-            "connections": connections,
         }
 
     def _fallback_hostname(self, device: dict[str, Any]) -> str | None:
@@ -277,3 +280,33 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     async def _async_handle_update(self, entry: ConfigEntry) -> None:
         self._attr_device_info = _device_info(entry)
         self.async_write_ha_state()
+
+    @staticmethod
+    def _extract_mac_identifiers(
+        device_key: str, device_data: dict[str, Any]
+    ) -> tuple[str | None, str | None, str | None]:
+        mac_addresses = device_data.get("mac_addresses") or []
+        primary_mac = device_data.get("primary_mac") or (
+            mac_addresses[0] if mac_addresses else None
+        )
+        candidates = [primary_mac, *mac_addresses, device_key]
+
+        for candidate in candidates:
+            normalized, mac_id = _mac_parts(candidate)
+            if normalized and mac_id:
+                return normalized, mac_id, candidate
+
+        return None, None, primary_mac or device_key
+
+
+def _build_device_sensor(
+    entry: ConfigEntry,
+    coordinator: DataUpdateCoordinator,
+    device_key: str,
+    device_data: dict[str, Any],
+) -> NxControllerDeviceSensor | None:
+    try:
+        return NxControllerDeviceSensor(entry, coordinator, device_key, device_data)
+    except ValueError as err:
+        _LOGGER.debug("Skipping device %s: %s", device_key, err)
+        return None
