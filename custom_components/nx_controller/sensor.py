@@ -156,68 +156,7 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self) -> str:
-        device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
-        mac_addresses = device.get("mac_addresses") or [self._primary_mac]
-        primary_mac = mac_addresses[0]
-        host = device.get("host")
-        ipv4_addresses = device.get("ipv4_addresses") or []
-        ipv6_addresses = device.get("ipv6_addresses") or []
-        hostname_sources = self.coordinator.data.get("hostname_sources") or {}
-        dhcp_hosts = self.coordinator.data.get("dhcp", {}).get("hosts") or {}
-        dhcp_ip_map = {
-            info.get("ip"): info.get("name")
-            for info in dhcp_hosts.values()
-            if info.get("ip") and info.get("name")
-        }
-
-        resolved_hostname: str | None = None
-        for mac in mac_addresses:
-            normalized_mac = _normalize_mac(mac)
-            if not normalized_mac:
-                continue
-            resolved_hostname = _resolve_hostname(
-                hostname_sources.get(normalized_mac)
-            )
-            if resolved_hostname:
-                break
-
-        if resolved_hostname:
-            return resolved_hostname
-
-        dhcp_name: str | None = None
-        if dhcp_hosts:
-            for mac in mac_addresses:
-                host_info = dhcp_hosts.get(mac.lower())
-                if host_info and host_info.get("name"):
-                    dhcp_name = host_info["name"]
-                    break
-
-        if not dhcp_name and dhcp_ip_map:
-            for ip in ipv4_addresses:
-                name = dhcp_ip_map.get(ip)
-                if name:
-                    dhcp_name = name
-                    break
-
-        if dhcp_name:
-            return dhcp_name
-
-        if device.get("name"):
-            return device["name"]
-
-        if primary_mac:
-            return primary_mac
-
-        if host:
-            return host
-
-        if ipv4_addresses:
-            return ipv4_addresses[0]
-
-        if ipv6_addresses:
-            return ipv6_addresses[0]
-
-        return self._primary_mac
+        return self._normalized_mac
 
     @property
     def native_value(self):
