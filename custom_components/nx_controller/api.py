@@ -300,7 +300,7 @@ def _valid_hostname(value: str | None) -> str | None:
     if not value:
         return None
 
-    cleaned = value.strip()
+    cleaned = value.strip().strip("\"'")
     if not cleaned or cleaned == "*":
         return None
 

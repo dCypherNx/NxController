@@ -4,7 +4,6 @@ import logging
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
@@ -45,10 +44,8 @@ async def async_setup_entry(
     """Set up the Nx Controller sensor entity from a config entry."""
 
     data = hass.data[DOMAIN][entry.entry_id]
-    host = data["host"]
     coordinator = data["coordinator"]
 
-    router_sensor = NxControllerRouterSensor(entry, host, coordinator)
     device_entities: list[NxControllerDeviceSensor] = []
     known_device_keys: set[str] = set()
 
@@ -77,49 +74,7 @@ async def async_setup_entry(
 
     coordinator.async_add_listener(_async_handle_coordinator_update)
 
-    async_add_entities([router_sensor, *device_entities])
-
-
-class NxControllerRouterSensor(SensorEntity):
-    """Representation of the configured router or access point."""
-
-    _attr_icon = "mdi:router-network"
-    _attr_has_entity_name = True
-    _attr_should_poll = False
-    _attr_translation_key = "router_ip"
-
-    def __init__(
-        self, entry: ConfigEntry, host: str, coordinator: DataUpdateCoordinator
-    ) -> None:
-        self._entry = entry
-        self._coordinator = coordinator
-        self._attr_unique_id = f"{entry.entry_id}_ip"
-        self._attr_name = "IP Address"
-        self._attr_native_value = host
-        self._attr_device_info = _device_info(entry)
-
-    @property
-    def available(self) -> bool:
-        return self._coordinator.last_update_success
-
-    async def async_added_to_hass(self) -> None:
-        self.async_on_remove(
-            self._entry.add_update_listener(self._async_handle_update)
-        )
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        pending_macs = (self._coordinator.data or {}).get("pending_macs") or []
-        return {"pending_macs": pending_macs} if pending_macs else {}
-
-    async def _async_handle_update(self, entry: ConfigEntry) -> None:
-        host = entry.data[CONF_HOST]
-        self.hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})[
-            "host"
-        ] = host
-        self._attr_native_value = host
-        self._attr_device_info = _device_info(entry)
-        self.async_write_ha_state()
+    async_add_entities(device_entities)
 
 
 class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
@@ -157,7 +112,7 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self) -> str:
-        return self._normalized_mac
+        return self._resolved_hostname() or self._normalized_mac
 
     @property
     def native_value(self):
@@ -169,16 +124,7 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
         ipv4_addresses = device.get("ipv4_addresses", [])
         ipv6_addresses = device.get("ipv6_addresses", [])
-        hostname_sources = self.coordinator.data.get("hostname_sources") or {}
-        hostname = None
-        mac_candidates = device.get("mac_addresses") or [self._primary_mac]
-        for mac in mac_candidates:
-            normalized_mac = _normalize_mac(mac)
-            if not normalized_mac:
-                continue
-            hostname = _resolve_hostname(hostname_sources.get(normalized_mac))
-            if hostname:
-                break
+        hostname = self._resolved_hostname()
 
         return {
             "interfaces": device.get("interfaces", []),
@@ -197,6 +143,22 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
     async def _async_handle_update(self, entry: ConfigEntry) -> None:
         self._attr_device_info = _device_info(entry)
         self.async_write_ha_state()
+
+    def _resolved_hostname(self) -> str | None:
+        device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
+        hostname_sources = self.coordinator.data.get("hostname_sources") or {}
+        mac_candidates = device.get("mac_addresses") or [self._primary_mac]
+
+        for mac in mac_candidates:
+            normalized_mac = _normalize_mac(mac)
+            if not normalized_mac:
+                continue
+
+            hostname = _resolve_hostname(hostname_sources.get(normalized_mac))
+            if hostname:
+                return hostname
+
+        return None
 
     @staticmethod
     def _extract_mac_identifiers(
