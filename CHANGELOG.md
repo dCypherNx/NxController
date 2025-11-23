@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+- Corrige a geração de `entity_id` para usar sempre o alias e o MAC normalizado,
+  independentemente do hostname.
+- Define o hostname como nome amigável padrão apenas quando não há renomeação
+  personalizada no registro de entidades.
+
 ## 0.1.2
 - Define nome amigável padrão dos sensores com o hostname quando disponível, sem
   alterar o identificador das entidades e mantendo compatibilidade com renomes
