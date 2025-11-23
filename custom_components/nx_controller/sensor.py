@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -51,14 +52,9 @@ class NxControllerSensor(CoordinatorEntity[NxControllerCoordinator], SensorEntit
         self._primary_mac = primary_mac
         self._alias = coordinator.alias
         self._attr_unique_id = f"{self._alias}_{primary_mac.replace(':', '')}"
-        self._attr_suggested_object_id = f"{self._alias}_{primary_mac.replace(':', '_')}"
-
-        client = self._client
-        hostname = (client.hostname or "").strip()
-        if hostname and hostname.lower() not in {"desconhecido", "unknown"}:
-            self._attr_name = hostname
-        else:
-            self._attr_name = primary_mac.upper()
+        slug = f"{self._alias.lower()}_{primary_mac.replace(':', '_').lower()}"
+        self.entity_id = f"sensor.{slug}"
+        self._attr_suggested_object_id = slug
 
     @property
     def _client(self) -> NxClient:
@@ -98,3 +94,18 @@ class NxControllerSensor(CoordinatorEntity[NxControllerCoordinator], SensorEntit
             manufacturer="OpenWrt",
             model="NxController",
         )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+
+        registry = er.async_get(self.hass)
+        entry = registry.async_get(self.entity_id)
+
+        if entry is not None and entry.name:
+            return
+
+        hostname = (self._client.hostname or "").strip()
+        if hostname and hostname.lower() not in {"desconhecido", "unknown"}:
+            self._attr_name = hostname
+        else:
+            self._attr_name = self._primary_mac.upper()
