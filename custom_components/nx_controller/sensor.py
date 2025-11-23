@@ -149,9 +149,10 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
 
         self._normalized_mac = normalized_mac
         self._mac_id = mac_id
+        self._mac_object_id = self._normalized_mac.lower().replace(":", "_")
         self._primary_mac = primary_mac or self._normalized_mac
-        self._attr_unique_id = f"er605_{self._mac_id}"
-        self._attr_suggested_object_id = f"er605_{self._mac_id}"
+        self._attr_unique_id = f"er605_{self._mac_object_id}"
+        self._attr_suggested_object_id = f"er605_{self._mac_object_id}"
         self._attr_device_info = _device_info(entry)
 
     @property
