@@ -1,10 +1,5 @@
 # Changelog
 
-## 0.3.1
-- Corrige a identificação das entidades para usar exclusivamente o MAC
-  normalizado como unique_id, evitando que o hostname altere o identificador
-  dos sensores.
-
 ## 0.3.0
 - Implementa mapeamento persistente de identidades para consolidar dispositivos
   com MAC aleatório em sensores únicos e expõe a lista de MACs pendentes para
