@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+- Implementa mapeamento persistente de identidades para consolidar dispositivos
+  com MAC aleatório em sensores únicos e expõe a lista de MACs pendentes para
+  facilitar associações manuais.
+
 ## 0.2.8
 - Corrige a configuração do HACS para usar o conteúdo do repositório em vez de
   um artefato ZIP, garantindo que a integração apareça corretamente no Home
