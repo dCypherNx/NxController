@@ -1,10 +1,5 @@
 # Changelog
 
-## 0.3.4
-- Garante que os sensores de dispositivos conectados sejam sempre identificados
-  apenas pelo MAC normalizado, mantendo hostname apenas como atributo
-  informativo.
-
 ## 0.3.3
 - Corrige a identificação das entidades para usar sempre o MAC normalizado, sem
   recorrer ao hostname, e restaura os atributos de MAC e hostname.
