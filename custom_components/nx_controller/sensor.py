@@ -129,7 +129,15 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         primary_mac = device_data.get("primary_mac") or (
             mac_addresses[0] if mac_addresses else None
         )
-        self._primary_mac = (primary_mac or "").lower()
+        normalized_primary = _normalize_mac(primary_mac)
+        normalized_fallback = _normalize_mac(mac_addresses[0]) if mac_addresses else None
+        normalized_device_key = _normalize_mac(device_key)
+        self._primary_mac = (
+            normalized_primary
+            or normalized_fallback
+            or normalized_device_key
+            or (primary_mac or device_key)
+        )
         self._attr_unique_id = self._primary_mac
         self._attr_device_info = _device_info(entry)
 
