@@ -76,21 +76,24 @@ class DeviceRegistry:
         normalized = hostname.strip()
         return normalized.lower() or None
 
-    def get_primary_for_mac(self, mac: str) -> Optional[str]:
+    def get_primary_for_mac(self, alias: str, mac: str) -> Optional[str]:
         for primary, info in self.devices.items():
+            if info.get("alias") != alias:
+                continue
             if mac in info.get("macs", []):
                 return primary
         return None
 
     def _update_metadata(self, info: Dict[str, object], hostname: Optional[str], ipv4: Optional[str]) -> None:
         metadata: Dict[str, object] = info.setdefault("metadata", {})  # type: ignore[arg-type]
-        if hostname:
-            metadata["hostname"] = hostname
+        normalized_hostname = self._normalize_hostname(hostname)
+        if normalized_hostname:
+            metadata["hostname"] = normalized_hostname
         if ipv4:
             metadata["ipv4"] = ipv4
 
     def ensure_device(self, alias: str, mac: str, hostname: Optional[str], ipv4: Optional[str]) -> str:
-        existing = self.get_primary_for_mac(mac)
+        existing = self.get_primary_for_mac(alias, mac)
         if existing:
             return existing
         self.devices[mac] = {"alias": alias, "macs": [mac], "metadata": {}}
@@ -103,7 +106,7 @@ class DeviceRegistry:
             raise ValueError("Primary MAC not found")
         if primary.get("alias") != alias:
             raise ValueError("Alias mismatch for primary device")
-        alt_primary = self.get_primary_for_mac(alt_mac)
+        alt_primary = self.get_primary_for_mac(alias, alt_mac)
         if alt_primary and alt_primary != primary_mac:
             alt_info = self.devices.pop(alt_primary)
             for mac in alt_info.get("macs", []):
@@ -151,7 +154,7 @@ class DeviceRegistry:
     ) -> tuple[str, bool]:
         """Map a MAC to a primary device using hostname/IP association rules."""
 
-        existing_primary = self.get_primary_for_mac(mac)
+        existing_primary = self.get_primary_for_mac(alias, mac)
         if existing_primary:
             self._update_metadata(self.devices[existing_primary], hostname, ipv4)
             return existing_primary, False
