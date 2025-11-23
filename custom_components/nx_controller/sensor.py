@@ -180,9 +180,6 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
             if hostname:
                 break
 
-        if not hostname:
-            hostname = self._fallback_hostname(device)
-
         return {
             "interfaces": device.get("interfaces", []),
             "radios": device.get("radios", []),
@@ -191,26 +188,6 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
             "mac": self._normalized_mac,
             "hostname": hostname,
         }
-
-    def _fallback_hostname(self, device: dict[str, Any]) -> str | None:
-        host = device.get("host")
-        name = device.get("name")
-        ipv4_addresses = device.get("ipv4_addresses", [])
-        ipv6_addresses = device.get("ipv6_addresses", [])
-
-        if name:
-            return name
-
-        if host:
-            return host
-
-        if ipv4_addresses:
-            return ipv4_addresses[0]
-
-        if ipv6_addresses:
-            return ipv6_addresses[0]
-
-        return None
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
