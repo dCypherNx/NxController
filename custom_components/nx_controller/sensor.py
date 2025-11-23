@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.config_entries import ConfigEntry
 
+from .api import _normalize_mac, _resolve_hostname
 from .const import DOMAIN
 
 
@@ -91,6 +92,11 @@ class NxControllerRouterSensor(SensorEntity):
             self._entry.add_update_listener(self._async_handle_update)
         )
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        pending_macs = (self._coordinator.data or {}).get("pending_macs") or []
+        return {"pending_macs": pending_macs} if pending_macs else {}
+
     async def _async_handle_update(self, entry: ConfigEntry) -> None:
         host = entry.data[CONF_HOST]
         self.hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})[
@@ -123,7 +129,15 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         primary_mac = device_data.get("primary_mac") or (
             mac_addresses[0] if mac_addresses else None
         )
-        self._primary_mac = (primary_mac or "").lower()
+        normalized_primary = _normalize_mac(primary_mac)
+        normalized_fallback = _normalize_mac(mac_addresses[0]) if mac_addresses else None
+        normalized_device_key = _normalize_mac(device_key)
+        self._primary_mac = (
+            normalized_primary
+            or normalized_fallback
+            or normalized_device_key
+            or (primary_mac or device_key)
+        )
         self._attr_unique_id = self._primary_mac
         self._attr_device_info = _device_info(entry)
 
@@ -135,12 +149,27 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         host = device.get("host")
         ipv4_addresses = device.get("ipv4_addresses") or []
         ipv6_addresses = device.get("ipv6_addresses") or []
+        hostname_sources = self.coordinator.data.get("hostname_sources") or {}
         dhcp_hosts = self.coordinator.data.get("dhcp", {}).get("hosts") or {}
         dhcp_ip_map = {
             info.get("ip"): info.get("name")
             for info in dhcp_hosts.values()
             if info.get("ip") and info.get("name")
         }
+
+        resolved_hostname: str | None = None
+        for mac in mac_addresses:
+            normalized_mac = _normalize_mac(mac)
+            if not normalized_mac:
+                continue
+            resolved_hostname = _resolve_hostname(
+                hostname_sources.get(normalized_mac)
+            )
+            if resolved_hostname:
+                break
+
+        if resolved_hostname:
+            return resolved_hostname
 
         dhcp_name: str | None = None
         if dhcp_hosts:
@@ -187,6 +216,7 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
         device = self.coordinator.data.get("devices", {}).get(self._device_key, {})
         ipv4_addresses = device.get("ipv4_addresses", [])
         ipv6_addresses = device.get("ipv6_addresses", [])
+        hostname_sources = self.coordinator.data.get("hostname_sources") or {}
 
         connections: list[dict[str, Any]] = []
         seen_connections: set[tuple[tuple[str, Any], ...]] = set()
@@ -197,7 +227,18 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
             seen_connections.add(normalized)
             connections.append(connection)
 
-        hostname = self._resolve_hostname(device)
+        hostname = None
+        mac_candidates = device.get("mac_addresses") or [self._primary_mac]
+        for mac in mac_candidates:
+            normalized_mac = _normalize_mac(mac)
+            if not normalized_mac:
+                continue
+            hostname = _resolve_hostname(hostname_sources.get(normalized_mac))
+            if hostname:
+                break
+
+        if not hostname:
+            hostname = self._fallback_hostname(device)
 
         return {
             "interfaces": device.get("interfaces", []),
@@ -208,7 +249,7 @@ class NxControllerDeviceSensor(CoordinatorEntity, SensorEntity):
             "connections": connections,
         }
 
-    def _resolve_hostname(self, device: dict[str, Any]) -> str | None:
+    def _fallback_hostname(self, device: dict[str, Any]) -> str | None:
         host = device.get("host")
         name = device.get("name")
         ipv4_addresses = device.get("ipv4_addresses", [])

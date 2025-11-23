@@ -15,6 +15,13 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
+from .identity import (
+    consolidate_devices,
+    _find_primary_mac,
+    _load_known_devices,
+    _register_secondary_mac,
+    _save_known_devices,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,6 +33,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     username = entry.data[CONF_SSH_USERNAME]
     password = entry.data[CONF_SSH_PASSWORD]
     is_dhcp_provider = entry.data.get(CONF_IS_DHCP_PROVIDER, False)
+
+    known_devices = await _load_known_devices(hass, entry.entry_id)
 
     client = NxSSHClient(host, username, password)
 
@@ -40,6 +49,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if provider_data:
                 data["dhcp"] = provider_data
                 apply_dhcp_fallbacks(data.get("devices", {}), provider_data)
+
+        consolidated_devices, dirty = consolidate_devices(
+            data.get("devices", {}), known_devices
+        )
+        data["devices"] = consolidated_devices
+        data["pending_macs"] = known_devices.get("pending", [])
+
+        if dirty:
+            await _save_known_devices(hass, entry.entry_id, known_devices)
 
         return data
 
@@ -57,7 +75,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "host": host,
         "coordinator": coordinator,
         "is_dhcp_provider": is_dhcp_provider,
+        "known_devices": known_devices,
     }
+
+    async def _async_associate_mac(call) -> None:
+        primary_mac = call.data.get("primary_mac")
+        mac = call.data.get("mac")
+
+        if not primary_mac or not mac:
+            _LOGGER.warning("Missing primary_mac or mac in associate_mac call")
+            return
+
+        if not _find_primary_mac(primary_mac, known_devices):
+            _register_secondary_mac(primary_mac, primary_mac, known_devices)
+
+        if _register_secondary_mac(primary_mac, mac, known_devices):
+            await _save_known_devices(hass, entry.entry_id, known_devices)
+            await coordinator.async_request_refresh()
+
+    hass.services.async_register(
+        DOMAIN, f"{entry.entry_id}_associate_mac", _async_associate_mac
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -68,6 +106,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        hass.services.async_remove(DOMAIN, f"{entry.entry_id}_associate_mac")
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return unload_ok
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import ipaddress
+import re
 from typing import Any, Iterable
 
 import asyncssh
@@ -267,6 +268,160 @@ def apply_dhcp_fallbacks(
                 break
 
 
+def _hostname_entry() -> dict[str, Any]:
+    """Return a default hostname entry structure."""
+
+    return {
+        "static_hostname": None,
+        "dhcpv4_hostname": None,
+        "dhcpv6_hostname": None,
+        "ipv4": None,
+        "ipv6": None,
+    }
+
+
+def _normalize_mac(mac: str | None) -> str | None:
+    """Normalize a MAC address to upper case colon-separated format."""
+
+    if not mac:
+        return None
+
+    mac_clean = re.sub(r"[^0-9A-Fa-f]", "", mac)
+    if len(mac_clean) != 12:
+        return None
+
+    mac_clean = mac_clean.upper()
+    return ":".join(mac_clean[i : i + 2] for i in range(0, 12, 2))
+
+
+def _valid_hostname(value: str | None) -> str | None:
+    """Return a sanitized hostname or ``None`` when invalid."""
+
+    if not value:
+        return None
+
+    cleaned = value.strip()
+    if not cleaned or cleaned == "*":
+        return None
+
+    return cleaned
+
+
+def _parse_static_hosts(text: str) -> dict[str, dict[str, Any]]:
+    """Parse static host entries from ``uci show dhcp`` output."""
+
+    sections: dict[str, dict[str, str]] = {}
+    for line in text.splitlines():
+        if not line.startswith("dhcp."):
+            continue
+
+        key, _, value = line.partition("=")
+        if not value:
+            continue
+
+        value_clean = value.strip().strip('"')
+        key_parts = key.split(".")
+        if len(key_parts) < 2:
+            continue
+
+        section_id = key_parts[1]
+        option = ".".join(key_parts[2:]) if len(key_parts) > 2 else None
+        section_data = sections.setdefault(section_id, {})
+
+        if option:
+            section_data[option] = value_clean
+        else:
+            section_data["_type"] = value_clean
+
+    hosts: dict[str, dict[str, Any]] = {}
+    for section_data in sections.values():
+        if section_data.get("_type") != "host":
+            continue
+
+        macs_raw = section_data.get("mac")
+        if not macs_raw:
+            continue
+
+        hostname = _valid_hostname(section_data.get("name") or section_data.get("hostname"))
+        ip_value = section_data.get("ip")
+
+        for mac in macs_raw.split():
+            normalized_mac = _normalize_mac(mac)
+            if not normalized_mac:
+                continue
+
+            host_entry = hosts.setdefault(normalized_mac, _hostname_entry())
+            host_entry["static_hostname"] = hostname
+            if ip_value:
+                host_entry["ipv4"] = ip_value
+
+    return hosts
+
+
+def _parse_dhcpv4(text: str) -> dict[str, dict[str, Any]]:
+    """Parse DHCPv4 lease data from ``/tmp/dhcp.leases`` output."""
+
+    leases: dict[str, dict[str, Any]] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+
+        _, mac, ip_value, hostname_raw = parts[:4]
+        normalized_mac = _normalize_mac(mac)
+        if not normalized_mac:
+            continue
+
+        hostname = _valid_hostname(hostname_raw)
+
+        entry = leases.setdefault(normalized_mac, _hostname_entry())
+        if hostname:
+            entry["dhcpv4_hostname"] = hostname
+        if ip_value:
+            entry["ipv4"] = ip_value
+
+    return leases
+
+
+def _parse_dhcpv6(text: str) -> dict[str, dict[str, Any]]:
+    """Parse DHCPv6 lease data from ``/tmp/odhcpd.leases`` output."""
+
+    leases: dict[str, dict[str, Any]] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+
+        ipv6_value, mac, hostname_raw = parts[:3]
+        normalized_mac = _normalize_mac(mac)
+        if not normalized_mac:
+            continue
+
+        hostname = _valid_hostname(hostname_raw)
+
+        entry = leases.setdefault(normalized_mac, _hostname_entry())
+        if hostname:
+            entry["dhcpv6_hostname"] = hostname
+        if ipv6_value:
+            entry["ipv6"] = ipv6_value
+
+    return leases
+
+
+def _resolve_hostname(entry: dict[str, Any] | None) -> str | None:
+    """Resolve hostname priority for a collected entry."""
+
+    if not entry:
+        return None
+
+    for key in ("static_hostname", "dhcpv4_hostname", "dhcpv6_hostname"):
+        value = _valid_hostname(entry.get(key)) if entry.get(key) is not None else None
+        if value:
+            return value
+
+    return None
+
+
 class NxSSHClient:
     """Handle SSH interactions with the Nx Controller device."""
 
@@ -289,6 +444,7 @@ class NxSSHClient:
                 interfaces = await self._list_interfaces(conn)
                 wifi_radios = await self._wifi_radios(conn)
                 devices = await self._collect_devices(conn, interfaces)
+                hostname_sources = await self._collect_hostname_sources(conn)
                 dhcp_config = (
                     await self._collect_dhcp_config(conn) if collect_dhcp else None
                 )
@@ -302,6 +458,7 @@ class NxSSHClient:
         payload = {
             "interfaces": interfaces,
             "devices": aggregator.as_payload(),
+            "hostname_sources": hostname_sources,
         }
 
         if dhcp_config is not None:
@@ -518,6 +675,42 @@ class NxSSHClient:
                     }
 
         return {"ranges": dhcp_ranges, "hosts": dhcp_hosts}
+
+    async def _collect_hostname_sources(
+        self, conn: asyncssh.SSHClientConnection
+    ) -> dict[str, dict[str, Any]]:
+        """Collect hostname information from static hosts and DHCP leases."""
+
+        hostname_sources: dict[str, dict[str, Any]] = {}
+
+        static_result = await conn.run("uci show dhcp", check=False)
+        if static_result.exit_status == 0 and static_result.stdout:
+            for mac, data in _parse_static_hosts(static_result.stdout).items():
+                entry = hostname_sources.setdefault(mac, _hostname_entry())
+                if data.get("static_hostname"):
+                    entry["static_hostname"] = data["static_hostname"]
+                if data.get("ipv4"):
+                    entry["ipv4"] = data["ipv4"]
+
+        dhcpv4_result = await conn.run("cat /tmp/dhcp.leases", check=False)
+        if dhcpv4_result.exit_status == 0 and dhcpv4_result.stdout:
+            for mac, data in _parse_dhcpv4(dhcpv4_result.stdout).items():
+                entry = hostname_sources.setdefault(mac, _hostname_entry())
+                if data.get("dhcpv4_hostname"):
+                    entry["dhcpv4_hostname"] = data["dhcpv4_hostname"]
+                if data.get("ipv4"):
+                    entry["ipv4"] = data["ipv4"]
+
+        dhcpv6_result = await conn.run("cat /tmp/odhcpd.leases", check=False)
+        if dhcpv6_result.exit_status == 0 and dhcpv6_result.stdout:
+            for mac, data in _parse_dhcpv6(dhcpv6_result.stdout).items():
+                entry = hostname_sources.setdefault(mac, _hostname_entry())
+                if data.get("dhcpv6_hostname"):
+                    entry["dhcpv6_hostname"] = data["dhcpv6_hostname"]
+                if data.get("ipv6"):
+                    entry["ipv6"] = data["ipv6"]
+
+        return hostname_sources
 
     @staticmethod
     def _as_int(value: str | None) -> int | None:
