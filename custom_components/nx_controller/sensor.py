@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_FRIENDLY_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -52,14 +51,18 @@ class NxControllerSensor(CoordinatorEntity[NxControllerCoordinator], SensorEntit
         self._primary_mac = primary_mac
         self._alias = coordinator.alias
         self._attr_unique_id = f"{self._alias}_{primary_mac.replace(':', '')}"
+        self._attr_suggested_object_id = f"{self._alias}_{primary_mac.replace(':', '_')}"
+
+        client = self._client
+        hostname = (client.hostname or "").strip()
+        if hostname and hostname.lower() not in {"desconhecido", "unknown"}:
+            self._attr_name = hostname
+        else:
+            self._attr_name = primary_mac.upper()
 
     @property
     def _client(self) -> NxClient:
         return self.coordinator.data[self._primary_mac]
-
-    @property
-    def name(self) -> str:
-        return f"{self._alias}_{self._primary_mac.replace(':', '_')}"
 
     @property
     def available(self) -> bool:
@@ -72,9 +75,7 @@ class NxControllerSensor(CoordinatorEntity[NxControllerCoordinator], SensorEntit
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         client = self._client
-        hostname = client.hostname or f"Desconhecido ({client.primary_mac})"
         return {
-            ATTR_FRIENDLY_NAME: hostname,
             "mac_address": client.primary_mac,
             "ipv4": client.ipv4,
             "ipv6": client.ipv6,

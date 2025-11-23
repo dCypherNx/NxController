@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+- Define nome amigável padrão dos sensores com o hostname quando disponível, sem
+  alterar o identificador das entidades e mantendo compatibilidade com renomes
+  feitos pelo usuário.
+- Incremento de versão para a release 0.1.2.
+
 ## 0.1.1
 - Hostname dos dispositivos é exposto somente como atributo resolvido, mantendo
   o MAC como identificador principal.
