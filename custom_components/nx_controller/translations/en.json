@@ -1,29 +1,41 @@
 {
-  "title": "Nx Controller",
   "config": {
     "step": {
       "user": {
-        "title": "Nx Controller",
-        "description": "Provide SSH credentials to reach the controller.",
+        "title": "NxController",
+        "description": "Connect to an OpenWrt router or access point via SSH.",
         "data": {
-          "host": "IP address",
+          "alias": "Alias",
+          "host": "Host",
+          "port": "Port",
           "username": "Username",
           "password": "Password",
-          "is_dhcp_provider": "Provides DHCP for the network"
+          "is_dhcp_server": "Is DHCP server"
         }
       }
     },
     "error": {
-      "cannot_connect": "Cannot connect to the controller. Verify host and credentials."
+      "alias_exists": "Alias already configured.",
+      "cannot_connect": "Cannot connect to the device."
     }
   },
-  "entity": {
-    "sensor": {
-      "router_ip": {
-        "name": "IP Address"
-      },
-      "connected_device": {
-        "name": "Connected Device"
+  "services": {
+    "map_mac": {
+      "name": "Map MAC",
+      "description": "Associate a random MAC to an existing device",
+      "fields": {
+        "alias": {
+          "name": "Alias",
+          "description": "Router/AP alias"
+        },
+        "primary_mac": {
+          "name": "Primary MAC",
+          "description": "Primary MAC for the logical device"
+        },
+        "alt_mac": {
+          "name": "Alternate MAC",
+          "description": "New MAC to associate"
+        }
       }
     }
   }

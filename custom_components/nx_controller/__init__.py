@@ -1,128 +1,349 @@
+"""NxController integration entry point."""
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field, replace
+from typing import Dict, List, Optional, Set
+
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST
-from homeassistant.core import HomeAssistant
+from homeassistant.const import CONF_PASSWORD, CONF_PORT, CONF_USERNAME, Platform
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import NxSSHClient, NxSSHError, apply_dhcp_fallbacks
 from .const import (
-    CONF_IS_DHCP_PROVIDER,
-    CONF_SSH_PASSWORD,
-    CONF_SSH_USERNAME,
+    CONF_ALIAS,
+    CONF_HOST,
+    CONF_IS_DHCP_SERVER,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_PORT,
     DOMAIN,
-    PLATFORMS,
+    EVENT_NEW_MAC_DETECTED,
+    SERVICE_MAP_MAC,
+    STORAGE_KEY,
+    STORAGE_VERSION,
 )
-from .identity import (
-    consolidate_devices,
-    _find_primary_mac,
-    _load_known_devices,
-    _register_secondary_mac,
-    _save_known_devices,
+from .ssh_client import (
+    NxSSHClient,
+    NxSSHError,
+    normalize_mac,
+    utcnow_iso,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Nx Controller from a config entry."""
+@dataclass
+class NxClient:
+    """Normalized representation of a network client."""
 
-    host = entry.data[CONF_HOST]
-    username = entry.data[CONF_SSH_USERNAME]
-    password = entry.data[CONF_SSH_PASSWORD]
-    is_dhcp_provider = entry.data.get(CONF_IS_DHCP_PROVIDER, False)
+    primary_mac: str
+    alias: str
+    macs: Set[str] = field(default_factory=set)
+    hostname: Optional[str] = None
+    ipv4: Optional[str] = None
+    ipv6: Optional[str] = None
+    interface: Optional[str] = None
+    connection_type: Optional[str] = None
+    rx_bytes: Optional[int] = None
+    tx_bytes: Optional[int] = None
+    signal_dbm: Optional[int] = None
+    last_seen: Optional[str] = None
+    dhcp_source: Optional[str] = None
+    online: bool = False
 
-    known_devices = await _load_known_devices(hass, entry.entry_id)
 
-    client = NxSSHClient(host, username, password)
+class DeviceRegistry:
+    """Persistence for mapping dynamic MACs to primary MACs."""
 
-    async def _async_update_data():
-        try:
-            data = await client.fetch_interface_devices(collect_dhcp=is_dhcp_provider)
-        except NxSSHError as err:
-            raise UpdateFailed(f"Failed to refresh Nx Controller data: {err}") from err
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self.devices: Dict[str, Dict[str, object]] = {}
 
-        if not is_dhcp_provider:
-            provider_data = _find_dhcp_data(hass, entry.entry_id)
-            if provider_data:
-                data["dhcp"] = provider_data
-                apply_dhcp_fallbacks(data.get("devices", {}), provider_data)
+    async def async_load(self) -> None:
+        data = await self._store.async_load() or {}
+        self.devices = data.get("devices", {})
 
-        consolidated_devices, dirty = consolidate_devices(
-            data.get("devices", {}), known_devices
+    async def async_save(self) -> None:
+        await self._store.async_save({"version": STORAGE_VERSION, "devices": self.devices})
+
+    def get_primary_for_mac(self, mac: str) -> Optional[str]:
+        for primary, info in self.devices.items():
+            if mac in info.get("macs", []):
+                return primary
+        return None
+
+    def ensure_device(self, alias: str, mac: str) -> str:
+        existing = self.get_primary_for_mac(mac)
+        if existing:
+            return existing
+        self.devices[mac] = {"alias": alias, "macs": [mac], "metadata": {}}
+        return mac
+
+    def add_mac(self, alias: str, primary_mac: str, alt_mac: str) -> None:
+        primary = self.devices.get(primary_mac)
+        if not primary:
+            raise ValueError("Primary MAC not found")
+        if primary.get("alias") != alias:
+            raise ValueError("Alias mismatch for primary device")
+        alt_primary = self.get_primary_for_mac(alt_mac)
+        if alt_primary and alt_primary != primary_mac:
+            alt_info = self.devices.pop(alt_primary)
+            for mac in alt_info.get("macs", []):
+                if mac not in primary["macs"]:
+                    primary["macs"].append(mac)
+        if alt_mac not in primary["macs"]:
+            primary["macs"].append(alt_mac)
+
+
+class NxControllerCoordinator(DataUpdateCoordinator[Dict[str, NxClient]]):
+    """Data update coordinator for NxController."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, registry: DeviceRegistry) -> None:
+        self.entry = entry
+        self.registry = registry
+        self.alias = entry.data[CONF_ALIAS]
+        self.is_dhcp_server = entry.data.get(CONF_IS_DHCP_SERVER, False)
+        self.client = NxSSHClient(
+            entry.data[CONF_HOST],
+            entry.data.get(CONF_PORT, DEFAULT_PORT),
+            entry.data[CONF_USERNAME],
+            entry.data[CONF_PASSWORD],
         )
-        data["devices"] = consolidated_devices
-        data["pending_macs"] = known_devices.get("pending", [])
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=f"{DOMAIN}_{self.alias}",
+            update_interval=DEFAULT_SCAN_INTERVAL,
+        )
 
-        if dirty:
-            await _save_known_devices(hass, entry.entry_id, known_devices)
+    async def _async_update_data(self) -> Dict[str, NxClient]:
+        previous_clients: Dict[str, NxClient] = self.data or {}
+        clients: Dict[str, NxClient] = {}
+        try:
+            hosts = await self.client.async_get_dhcp_hosts() if self.is_dhcp_server else []
+            dhcp_v4 = await self.client.async_get_dhcp_leases() if self.is_dhcp_server else []
+            dhcp_v6 = await self.client.async_get_odhcpd_leases() if self.is_dhcp_server else []
+            neighbors = await self.client.async_get_neighbors()
+            wifi_interfaces = await self.client.async_get_wifi_interfaces()
+            wifi_clients: List[dict] = []
+            for iface in wifi_interfaces:
+                assoc = await self.client.async_get_wifi_clients(iface)
+                for item in assoc:
+                    wifi_clients.append({"mac": item.mac, "interface": item.interface, "signal": item.signal_dbm})
+        except NxSSHError as err:
+            raise UpdateFailed(str(err)) from err
 
-        return data
+        def register_client(mac: str, data: dict) -> None:
+            normalized_mac = normalize_mac(mac)
+            if not normalized_mac:
+                return
+            primary = self.registry.get_primary_for_mac(normalized_mac)
+            is_new = False
+            if not primary:
+                primary = self.registry.ensure_device(self.alias, normalized_mac)
+                is_new = True
+            client = clients.get(primary)
+            if not client:
+                if previous := previous_clients.get(primary):
+                    client = replace(previous)
+                    client.macs = set(previous.macs)
+                else:
+                    client = NxClient(primary_mac=primary, alias=self.alias, macs=set())
+                clients[primary] = client
+            client.macs.add(normalized_mac)
+            hostname = data.get("hostname") or client.hostname
+            if hostname:
+                client.hostname = hostname
+            ipv4 = data.get("ipv4") or data.get("ip")
+            if ipv4:
+                client.ipv4 = ipv4
+            ipv6 = data.get("ipv6")
+            if ipv6:
+                client.ipv6 = ipv6
+            if data.get("interface"):
+                client.interface = data.get("interface")
+            if data.get("connection_type"):
+                client.connection_type = data.get("connection_type")
+            if data.get("rx_bytes") is not None:
+                client.rx_bytes = data.get("rx_bytes")
+            if data.get("tx_bytes") is not None:
+                client.tx_bytes = data.get("tx_bytes")
+            if data.get("signal_dbm") is not None:
+                client.signal_dbm = data.get("signal_dbm")
+            if data.get("dhcp_source"):
+                client.dhcp_source = data.get("dhcp_source")
+            if data.get("online") is not None:
+                client.online = data.get("online")
+            if data.get("last_seen"):
+                client.last_seen = data.get("last_seen")
+            if is_new:
+                self.hass.bus.async_fire(
+                    EVENT_NEW_MAC_DETECTED,
+                    {
+                        "alias": self.alias,
+                        "mac": normalized_mac,
+                        "ipv4": client.ipv4,
+                        "ipv6": client.ipv6,
+                        "hostname": client.hostname,
+                        "connection_type": client.connection_type,
+                    },
+                )
 
-    coordinator = DataUpdateCoordinator(
-        hass,
-        _LOGGER,
-        name="Nx Controller data",
-        update_method=_async_update_data,
-        update_interval=DEFAULT_SCAN_INTERVAL,
-    )
+        for entry in hosts:
+            register_client(
+                entry["mac"],
+                {
+                    "hostname": entry.get("hostname"),
+                    "ipv4": entry.get("ip"),
+                    "dhcp_source": entry.get("source"),
+                    "online": False,
+                    "last_seen": utcnow_iso(),
+                },
+            )
 
-    await coordinator.async_config_entry_first_refresh()
+        for lease in dhcp_v4:
+            register_client(
+                lease["mac"],
+                {
+                    "hostname": lease.get("hostname"),
+                    "ipv4": lease.get("ip"),
+                    "dhcp_source": lease.get("source"),
+                    "online": False,
+                    "last_seen": utcnow_iso(),
+                },
+            )
+
+        for lease in dhcp_v6:
+            register_client(
+                lease["mac"],
+                {
+                    "hostname": lease.get("hostname"),
+                    "ipv6": lease.get("ipv6"),
+                    "dhcp_source": lease.get("source"),
+                    "online": False,
+                    "last_seen": utcnow_iso(),
+                },
+            )
+
+        for neighbor in neighbors:
+            register_client(
+                neighbor.mac,
+                {
+                    "ipv4": neighbor.ip,
+                    "interface": neighbor.interface,
+                    "connection_type": "wired"
+                    if neighbor.interface and not neighbor.interface.startswith("wl")
+                    else None,
+                    "online": True,
+                    "last_seen": utcnow_iso(),
+                },
+            )
+
+        for wifi in wifi_clients:
+            register_client(
+                wifi["mac"],
+                {
+                    "interface": wifi.get("interface"),
+                    "connection_type": "wireless",
+                    "signal_dbm": wifi.get("signal"),
+                    "online": True,
+                    "last_seen": utcnow_iso(),
+                },
+            )
+
+        await self.registry.async_save()
+
+        for primary, info in self.registry.devices.items():
+            if info.get("alias") != self.alias:
+                continue
+            if primary in clients:
+                continue
+            previous = previous_clients.get(primary)
+            if previous:
+                clients[primary] = replace(previous)
+                clients[primary].online = False
+            else:
+                clients[primary] = NxClient(
+                    primary_mac=primary,
+                    alias=self.alias,
+                    macs=set(info.get("macs", [])),
+                    online=False,
+                )
+
+        return clients
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up the NxController integration."""
+
+    hass.data.setdefault(DOMAIN, {})
+
+    async def async_handle_map_mac(call: ServiceCall) -> None:
+        alias = call.data[CONF_ALIAS]
+        primary = normalize_mac(call.data.get("primary_mac", ""))
+        alt = normalize_mac(call.data.get("alt_mac", ""))
+        if not primary or not alt:
+            raise ValueError("Invalid MAC provided")
+        target_entry_id = None
+        for entry_id, data in hass.data[DOMAIN].items():
+            if isinstance(data, NxControllerCoordinator) or "coordinator" in data:
+                coordinator: NxControllerCoordinator = (
+                    data if isinstance(data, NxControllerCoordinator) else data["coordinator"]
+                )
+                if coordinator.alias == alias:
+                    target_entry_id = entry_id
+                    registry = coordinator.registry
+                    break
+        if not target_entry_id:
+            raise ValueError("Alias not found")
+        registry.add_mac(alias, primary, alt)
+        await registry.async_save()
+        entity_reg = er.async_get(hass)
+        alt_unique = f"{alias}_{alt.replace(':', '')}"
+        for entity_id, entry in list(entity_reg.entities.items()):
+            if entry.unique_id == alt_unique:
+                entity_reg.async_remove(entity_id)
+        coordinator.async_set_updated_data(coordinator.data)
+        await coordinator.async_request_refresh()
+
+    hass.services.async_register(DOMAIN, SERVICE_MAP_MAC, async_handle_map_mac)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up NxController from a config entry."""
+
+    registry = DeviceRegistry(hass)
+    await registry.async_load()
+
+    coordinator = NxControllerCoordinator(hass, entry, registry)
+
+    try:
+        await coordinator.client.async_run_command("echo NxController")
+    except NxSSHError as err:
+        raise ConfigEntryNotReady(str(err)) from err
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "host": host,
         "coordinator": coordinator,
-        "is_dhcp_provider": is_dhcp_provider,
-        "known_devices": known_devices,
+        "registry": registry,
     }
 
-    async def _async_associate_mac(call) -> None:
-        primary_mac = call.data.get("primary_mac")
-        mac = call.data.get("mac")
-
-        if not primary_mac or not mac:
-            _LOGGER.warning("Missing primary_mac or mac in associate_mac call")
-            return
-
-        if not _find_primary_mac(primary_mac, known_devices):
-            _register_secondary_mac(primary_mac, primary_mac, known_devices)
-
-        if _register_secondary_mac(primary_mac, mac, known_devices):
-            await _save_known_devices(hass, entry.entry_id, known_devices)
-            await coordinator.async_request_refresh()
-
-    hass.services.async_register(
-        DOMAIN, f"{entry.entry_id}_associate_mac", _async_associate_mac
-    )
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.SENSOR])
+    await coordinator.async_config_entry_first_refresh()
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload Nx Controller config entry."""
+    """Unload NxController config entry."""
 
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    data = hass.data[DOMAIN].get(entry.entry_id)
+    if data:
+        await data["coordinator"].client.close()
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, [Platform.SENSOR])
     if unload_ok:
-        hass.services.async_remove(DOMAIN, f"{entry.entry_id}_associate_mac")
-        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
-
-
-def _find_dhcp_data(hass: HomeAssistant, current_entry_id: str) -> dict | None:
-    """Return DHCP data from the entry flagged as provider."""
-
-    for entry_id, entry_data in hass.data.get(DOMAIN, {}).items():
-        if entry_id == current_entry_id:
-            continue
-
-        if not entry_data.get("is_dhcp_provider"):
-            continue
-
-        coordinator = entry_data.get("coordinator")
-        if coordinator and coordinator.data:
-            return coordinator.data.get("dhcp")
-
-    return None
