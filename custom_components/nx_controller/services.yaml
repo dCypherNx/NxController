@@ -1,0 +1,25 @@
+map_mac:
+  name: Map MAC alias
+  description: Associate a new MAC address to an existing primary device.
+  fields:
+    alias:
+      name: Router alias
+      description: Alias defined in the config entry.
+      required: true
+      example: AP01
+      selector:
+        text:
+    primary_mac:
+      name: Primary MAC
+      description: Existing primary MAC to map to.
+      required: true
+      example: AA:BB:CC:DD:EE:FF
+      selector:
+        text:
+    alt_mac:
+      name: Alternate MAC
+      description: Additional MAC to associate to the same device.
+      required: true
+      example: 11:22:33:44:55:66
+      selector:
+        text:

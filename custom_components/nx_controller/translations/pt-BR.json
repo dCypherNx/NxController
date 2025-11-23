@@ -1,0 +1,42 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "NxController",
+        "description": "Conecte-se a um roteador ou AP OpenWrt via SSH.",
+        "data": {
+          "alias": "Alias",
+          "host": "Host",
+          "port": "Porta",
+          "username": "Usuário",
+          "password": "Senha",
+          "is_dhcp_server": "É servidor DHCP"
+        }
+      }
+    },
+    "error": {
+      "alias_exists": "Alias já configurado.",
+      "cannot_connect": "Não foi possível conectar ao equipamento."
+    }
+  },
+  "services": {
+    "map_mac": {
+      "name": "Mapear MAC",
+      "description": "Associa um MAC aleatório a um dispositivo existente",
+      "fields": {
+        "alias": {
+          "name": "Alias",
+          "description": "Alias do roteador/AP"
+        },
+        "primary_mac": {
+          "name": "MAC primário",
+          "description": "MAC primário do dispositivo lógico"
+        },
+        "alt_mac": {
+          "name": "MAC alternativo",
+          "description": "Novo MAC a ser associado"
+        }
+      }
+    }
+  }
+}
